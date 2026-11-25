@@ -35,16 +35,28 @@ def unplug(fd):
     time.sleep(.6)
 
 
+WRITE = """
+import dbus, dbus.bus, os, sys
+bus = dbus.bus.BusConnection(os.environ["DBUS_SYSTEM_BUS_ADDRESS"])
+chrc = bus.get_object(sys.argv[1], sys.argv[2], introspect=False)
+chrc.WriteValue(dbus.Array(bytes.fromhex(sys.argv[3]), signature="y"), dbus.Dictionary({}, signature="sv"),
+                dbus_interface="org.bluez.GattCharacteristic1")
+"""
+
+
+def write_char(sender, path, hexs):
+    # Not dbus-send: its empty dictionary differs between versions.
+    p = subprocess.run([sys.executable, "-c", WRITE, sender, path, hexs], env=env, capture_output=True, text=True)
+    if p.returncode:
+        print(p.stderr[-300:])
+    return p.returncode == 0
+
+
 def rum(hexs):
     a = [x for x in L() if x["ev"] == "app"][0]
-    data = ",".join("0x" + hexs[i:i + 2] for i in range(0, len(hexs), 2))
-    p = subprocess.run(["dbus-send", "--bus=" + env["DBUS_SYSTEM_BUS_ADDRESS"], "--print-reply",
-                        "--dest=" + a["sender"], a["chars"][-1][0],
-                        "org.bluez.GattCharacteristic1.WriteValue",
-                        "array:byte:" + data, "dict:string:variant:"],
-                       capture_output=True, text=True)
+    done = write_char(a["sender"], a["chars"][-1][0], hexs)
     time.sleep(.2)
-    return p.returncode == 0
+    return done
 
 
 def mkpad():

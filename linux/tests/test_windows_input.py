@@ -21,6 +21,23 @@ threading.Thread(target=lambda: [lines.append(x.decode().rstrip()) for x in r.st
 time.sleep(2.5)
 
 
+WRITE = """
+import dbus, dbus.bus, os, sys
+bus = dbus.bus.BusConnection(os.environ["DBUS_SYSTEM_BUS_ADDRESS"])
+chrc = bus.get_object(sys.argv[1], sys.argv[2], introspect=False)
+chrc.WriteValue(dbus.Array(bytes.fromhex(sys.argv[3]), signature="y"), dbus.Dictionary({}, signature="sv"),
+                dbus_interface="org.bluez.GattCharacteristic1")
+"""
+
+
+def write_char(sender, path, hexs):
+    # Not dbus-send: its empty dictionary differs between versions.
+    p = subprocess.run([sys.executable, "-c", WRITE, sender, path, hexs], env=env, capture_output=True, text=True)
+    if p.returncode:
+        print(p.stderr[-300:])
+    return p.returncode == 0
+
+
 def L():
     return [json.loads(x) for x in open(OUT)]
 
@@ -63,6 +80,7 @@ try:
     send(frame(lt=255, rt=128))
     chk("triggers", last()[4] == 1023 and last()[5] == 128 * 1023 // 255, last()[4:6])
     send(frame())
+    time.sleep(.5)     # let earlier reports arrive before counting
     n0 = len(L())
     for i in range(50):
         send(frame(b=0x1000) + frame())     # several frames in one write
@@ -79,10 +97,7 @@ try:
     a = [x for x in L() if x["ev"] == "app"][0]
 
     def rum(h):
-        return subprocess.run(["dbus-send", "--bus=" + env["DBUS_SYSTEM_BUS_ADDRESS"], "--print-reply", "--dest=" + a["sender"],
-                               a["chars"][-1][0], "org.bluez.GattCharacteristic1.WriteValue",
-                               "array:byte:" + ",".join("0x" + h[i:i + 2] for i in range(0, len(h), 2)), "dict:string:variant:"],
-                              capture_output=True).returncode == 0
+        return write_char(a["sender"], a["chars"][-1][0], h)
     chk("rumble accepted", rum("0f000063150a0000") and rum("0f000000000a0000"))
     time.sleep(.3)
     chk("rumble lines sent back", "@rumble 99 21 100" in lines and "@rumble 0 0 100" in lines, [x for x in lines if x.startswith("@")])
