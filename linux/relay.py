@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Relay: forwards a USB gamepad (the Redgear dongle, which Linux sees as an Xbox 360
-pad, 045e:028e) to an iPhone/iPad, posing as a Bluetooth Xbox Wireless Controller.
+Relay: forwards a USB gamepad to an iPhone/iPad, posing as a Bluetooth Xbox Wireless
+Controller. Xbox-type pads are read exactly; other pads use the usual button order.
 
 Easiest way to start it:   bash run.sh
 Controller check only, no Bluetooth or phone needed:   bash run.sh --check
@@ -32,7 +32,8 @@ FF_RUMBLE = 0x50
 SYN_REPORT, SYN_DROPPED = 0, 3
 ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ = 0, 1, 2, 3, 4, 5
 ABS_HAT0X, ABS_HAT0Y = 16, 17
-AXES = (ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_HAT0X, ABS_HAT0Y)
+ABS_GAS, ABS_BRAKE = 9, 10
+AXES = (ABS_X, ABS_Y, ABS_Z, ABS_RX, ABS_RY, ABS_RZ, ABS_GAS, ABS_BRAKE, ABS_HAT0X, ABS_HAT0Y)
 
 KEY_TO_BUTTON = {
     0x130: pt.BTN_A, 0x131: pt.BTN_B, 0x133: pt.BTN_X, 0x134: pt.BTN_Y,
@@ -45,8 +46,34 @@ BUTTON_NAMES = {
     pt.BTN_LB: "LB", pt.BTN_RB: "RB", pt.BTN_VIEW: "View", pt.BTN_MENU: "Menu",
     pt.BTN_XBOX: "Xbox", pt.BTN_LS: "LS", pt.BTN_RS: "RS",
 }
-# Some pads report the d-pad as four keys (left, right, up, down) instead of a hat.
-DPAD_KEYS = {0x2C0: (-1, 0), 0x2C1: (1, 0), 0x2C2: (0, -1), 0x2C3: (0, 1)}
+# Some pads report the d-pad as four keys instead of a hat.
+DPAD_KEYS = {0x2C0: (-1, 0), 0x2C1: (1, 0), 0x2C2: (0, -1), 0x2C3: (0, 1),
+             0x222: (-1, 0), 0x223: (1, 0), 0x220: (0, -1), 0x221: (0, 1)}
+# Plain HID joysticks number their buttons; most pads use this order.
+JOYSTICK_KEYS = dict(zip(range(0x120, 0x12D), (
+    pt.BTN_X, pt.BTN_A, pt.BTN_B, pt.BTN_Y, pt.BTN_LB, pt.BTN_RB, "LT", "RT",
+    pt.BTN_VIEW, pt.BTN_MENU, pt.BTN_LS, pt.BTN_RS, pt.BTN_XBOX)))
+SONY, NINTENDO = 0x054C, 0x057E     # their drivers name the top button Y, not X
+
+
+class Layout:
+    """Which Linux key or axis is which Xbox control. The default is Linux's xpad driver."""
+
+    def __init__(self, keys=None, abs_codes=None, vendor=0):
+        has = set(AXES) - {ABS_GAS, ABS_BRAKE} if abs_codes is None else set(abs_codes)
+        if keys is not None and 0x130 not in keys and any(0x120 <= k < 0x12D for k in keys):
+            self.keys = dict(JOYSTICK_KEYS)
+        else:
+            self.keys = dict(KEY_TO_BUTTON)
+            self.keys.update({0x138: "LT", 0x139: "RT"})
+            if vendor in (SONY, NINTENDO):
+                self.keys[0x133], self.keys[0x134] = pt.BTN_Y, pt.BTN_X
+        if ABS_RX in has and ABS_RY in has:
+            right, triggers = (ABS_RX, ABS_RY), (ABS_Z, ABS_RZ)
+        else:
+            right, triggers = (ABS_Z, ABS_RZ), (ABS_BRAKE, ABS_GAS)
+        self.rx, self.ry = (c if c in has else None for c in right)
+        self.lt, self.rt = (c if c in has else None for c in triggers)
 
 # HID hat value for each (x, y) d-pad position; 0 means released.
 HAT = {(0, 0): 0, (0, -1): 1, (1, -1): 2, (1, 0): 3, (1, 1): 4,
@@ -113,6 +140,7 @@ class Pad:
 
     def __init__(self):
         self.ranges = dict(DEFAULT_RANGE)
+        self.layout = Layout()
         self.reset()
 
     def reset(self):
@@ -121,7 +149,7 @@ class Pad:
 
     def handle(self, etype, code, value):
         """Apply one event. Returns True if it changed a button or the d-pad."""
-        if etype == EV_KEY and (code in KEY_TO_BUTTON or code in DPAD_KEYS):
+        if etype == EV_KEY and (code in self.layout.keys or code in DPAD_KEYS):
             if value:
                 self.keys.add(code)
             else:
@@ -143,7 +171,13 @@ class Pad:
         return (v - lo) * top // (hi - lo)
 
     def buttons(self):
-        return tuple(sorted(KEY_TO_BUTTON[k] for k in self.keys if k in KEY_TO_BUTTON))
+        held = (self.layout.keys.get(k) for k in self.keys)
+        return tuple(sorted(b for b in held if isinstance(b, int)))
+
+    def _trigger(self, name, axis):
+        if any(self.layout.keys.get(k) == name for k in self.keys) and axis not in self.axes:
+            return 1023
+        return self._scaled(axis, 1023, 0)
 
     def hat(self):
         x, y = self.axes.get(ABS_HAT0X, 0), self.axes.get(ABS_HAT0Y, 0)
@@ -157,8 +191,8 @@ class Pad:
         c = pt.STICK_CENTER
         return pt.make_input_report(
             lx=self._scaled(ABS_X, 65535, c), ly=self._scaled(ABS_Y, 65535, c),
-            rx=self._scaled(ABS_RX, 65535, c), ry=self._scaled(ABS_RY, 65535, c),
-            lt=self._scaled(ABS_Z, 1023, 0), rt=self._scaled(ABS_RZ, 1023, 0),
+            rx=self._scaled(self.layout.rx, 65535, c), ry=self._scaled(self.layout.ry, 65535, c),
+            lt=self._trigger("LT", self.layout.lt), rt=self._trigger("RT", self.layout.rt),
             hat=self.hat(), buttons=self.buttons())
 
     def describe(self):
@@ -168,22 +202,39 @@ class Pad:
             lx, ly, rx, ry, lt, rt, self.hat(), " ".join(names))
 
 
+def bits_of(block, kind):
+    """The codes in a "B: KEY=..." line of /proc/bus/input/devices, as a set."""
+    m = re.search(r"^B: %s=([0-9a-f ]+)$" % kind, block, re.M)
+    value = 0
+    for word in (m.group(1).split() if m else ()):
+        value = value << 64 | int(word, 16)
+    return {i for i in range(value.bit_length()) if value >> i & 1}
+
+
 def find_pad(text, usb_id):
-    """Pick the gamepad's /dev/input/eventN out of /proc/bus/input/devices."""
-    by_name = None
+    """Pick a gamepad's /dev/input/eventN out of /proc/bus/input/devices.
+
+    The given USB ID wins, then anything named like an Xbox pad, then any other device
+    with gamepad or joystick buttons and a stick.
+    """
+    best = None
     for block in text.split("\n\n"):
         ident = re.search(r"Vendor=(\w+) Product=(\w+)", block)
         name = re.search(r'N: Name="(.*)"', block)
         event = re.search(r"H: Handlers=.*\b(event\d+)", block)
-        is_joystick = re.search(r"H: Handlers=.*\bjs\d+", block)
         if not (ident and name and event):
             continue
         found = ("/dev/input/" + event.group(1), name.group(1))
         if "%s:%s" % ident.groups() == usb_id:
             return found
-        if by_name is None and is_joystick and re.search(r"x-?box|xinput|redgear", name.group(1), re.I):
-            by_name = found
-    return by_name
+        keys, axes = bits_of(block, "KEY"), bits_of(block, "ABS")
+        # Mice (0x110), touchpads (0x145, 0x14A) and pens (0x140) are not gamepads.
+        if not ({0x130, 0x120} & keys) or not {0, 1} <= axes or {0x110, 0x140, 0x145, 0x14A} & keys:
+            continue
+        rank = 2 if re.search(r"x-?box|xinput", name.group(1), re.I) else 1
+        if best is None or rank > best[0]:
+            best = (rank, found)
+    return best[1] if best else None
 
 
 class PadReader:
@@ -225,8 +276,7 @@ class PadReader:
                         log("cannot open %s: %s" % (found[0], e))
         if self.fd is None:
             if not self.waiting_logged:
-                log("waiting for the controller (%s): plug in the dongle, turn the pad on"
-                    % self.usb_id)
+                log("waiting for the controller: plug in the gamepad or its dongle, and turn it on")
                 self.waiting_logged = True
             return True
         self.waiting_logged = False
@@ -272,9 +322,23 @@ class PadReader:
             self.rumble_failed = True
             log("rumble switched off: %s" % e)
 
+    def layout_of_device(self):
+        keys, axes, ident = bytearray(96), bytearray(8), bytearray(8)
+        try:
+            fcntl.ioctl(self.fd, _ior(0x20 + EV_KEY, len(keys)), keys)
+            fcntl.ioctl(self.fd, _ior(0x20 + EV_ABS, len(axes)), axes)
+            fcntl.ioctl(self.fd, _ior(0x02, len(ident)), ident)
+        except OSError:
+            return Layout()
+
+        def codes(bits):
+            return {i for i in range(len(bits) * 8) if bits[i // 8] >> (i % 8) & 1}
+        return Layout(codes(keys), codes(axes), struct.unpack_from("HH", ident)[1])
+
     def read_current_state(self):
-        """Ask the kernel for axis ranges and what is held right now."""
+        """Ask the kernel what the pad has, its axis ranges and what is held right now."""
         self.pad.reset()
+        self.pad.layout = self.layout_of_device()
         for code in AXES:
             buf = bytearray(24)
             try:
@@ -290,7 +354,7 @@ class PadReader:
             fcntl.ioctl(self.fd, _ior(0x18, len(keys)), keys)
         except OSError:
             return
-        for code in list(KEY_TO_BUTTON) + list(DPAD_KEYS):
+        for code in list(self.pad.layout.keys) + list(DPAD_KEYS):
             if keys[code // 8] >> (code % 8) & 1:
                 self.pad.keys.add(code)
 
@@ -652,6 +716,16 @@ def run_relay(args):
         reader = StdinPad(pad, sender.update, loop.quit)
     else:
         reader = PadReader(pad, args.usb_id, sender.update, args.device)
+        if args.quit_on_eof:
+            def on_stdin(fd, condition):
+                try:
+                    if os.read(fd, 4096):
+                        return True
+                except OSError:
+                    pass
+                loop.quit()
+                return False
+            GLib.io_add_watch(0, GLib.PRIORITY_DEFAULT, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_stdin)
     try:
         run_loop(loop)
     finally:
@@ -682,6 +756,8 @@ def main():
                     help="rumble strength: 0 is off, 200 is double (default 100)")
     ap.add_argument("--pair-seconds", type=int, default=180, metavar="N",
                     help="how long a new phone may pair after start; 0 = never (default 180)")
+    ap.add_argument("--quit-on-eof", action="store_true",
+                    help="stop when stdin closes (used by the Linux app)")
     ap.add_argument("--stdin", action="store_true",
                     help="take the gamepad from the Windows program instead of a USB device")
     ap.add_argument("--usb-id", default="045e:028e", help="controller USB ID (from lsusb)")

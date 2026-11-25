@@ -1,4 +1,4 @@
-// Plays iPhone/iPad games with an Xbox-type gamepad plugged into this Windows PC.
+// Plays iPhone/iPad games with a gamepad plugged into this Windows PC.
 // Windows reads the gamepad; the Linux relay in WSL poses as the Bluetooth controller.
 //
 //   controller.exe                 play (asks before taking Bluetooth from Windows); Q stops it
@@ -53,8 +53,6 @@ static class WinRt
 
 static class Program
 {
-    [StructLayout(LayoutKind.Sequential)]
-    struct Gamepad { public ushort Buttons; public byte LT, RT; public short LX, LY, RX, RY; }
     [StructLayout(LayoutKind.Sequential)]
     struct State { public uint Packet; public Gamepad Pad; }
     [StructLayout(LayoutKind.Sequential)]
@@ -263,7 +261,8 @@ static class Program
             Say(busId + " does not look like the Intel Bluetooth adapter:\n  " + line.Trim());
             return 1;
         }
-        if (FirstPad() < 0) Say("No gamepad seen yet. Plug in the dongle and turn the Redgear on; you can do it now.");
+        string padId;
+        if (PadKind(out padId) == 0) Say("No gamepad seen yet. Plug it in and turn it on; you can do it now.");
 
         bool shared = line.IndexOf("Not shared", StringComparison.OrdinalIgnoreCase) < 0;
         if (line.IndexOf("forced", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -372,16 +371,17 @@ static class Program
 
     internal class Checks
     {
-        public bool Usbipd, Attached, Pad;
-        public int Adapters;
-        public string Radio;
+        public bool Usbipd, Attached;
+        public int Adapters, Pad;
+        public string Radio, PadId;
         public List<string> Phones, Audio;
     }
 
     // Everything the window shows; changes nothing.
     internal static Checks Look()
     {
-        var c = new Checks { Usbipd = File.Exists(Usbipd), Pad = FirstPad() >= 0 };
+        var c = new Checks { Usbipd = File.Exists(Usbipd) };
+        c.Pad = PadKind(out c.PadId);
         var intel = UsbLines().Where(l => l.IndexOf("8087:", StringComparison.Ordinal) >= 0
             && l.IndexOf("bluetooth", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
         c.Adapters = intel.Count;
@@ -683,42 +683,74 @@ static class Program
         if (!gui) Say("Press Q in this window to stop and give Bluetooth back.");
         var pipe = relay.StandardInput.BaseStream;
 
-        int slot = -1;
-        uint lastPacket = 0;
+        int slot = -1, joy = -1;
+        var raw = new RawPad();
+        PadMap map = null;
+        var last = new Gamepad();
         bool haveLast = false;
-        long nextSearch = 0;
+        long nextSearch = 0, lastMove = 0, nextCheck = 0;
         var frame = new byte[14];
         try
         {
             Send(pipe, frame, 'N', new Gamepad());
-            while (!stop && !relay.HasExited)
+            while (!stop)
             {
-                CheckStopRequest();
                 long now = Clock.ElapsedMilliseconds;
-                if (slot < 0 && now >= nextSearch)
+                if (now >= nextCheck)
                 {
-                    slot = FirstPad();
-                    nextSearch = now + 1000;
-                    haveLast = false;
+                    nextCheck = now + 100;
+                    if (relay.HasExited) break;
+                    CheckStopRequest();
                 }
-                if (slot >= 0)
+                if (slot < 0 && joy < 0 && now >= nextSearch)
                 {
-                    var st = new State();
-                    if (XInputGetStateEx((uint)slot, ref st) != 0)
+                    nextSearch = now + 1500;
+                    haveLast = false;
+                    slot = FirstPad();
+                    string id = null;
+                    if (slot < 0) joy = Joy.Find(out id);
+                    if (slot >= 0) Say("Gamepad: XInput");
+                    else if (joy >= 0)
                     {
-                        slot = -1;
-                        nextSearch = now + 1000;
+                        bool saved;
+                        map = PadMap.Load(id, out saved);
+                        Say("Gamepad: DirectInput " + id + (saved ? ", with your saved buttons" : ", with the usual button order"));
+                    }
+                }
+                if (slot >= 0 || joy >= 0)
+                {
+                    var g = new Gamepad();
+                    bool there;
+                    if (slot >= 0)
+                    {
+                        var st = new State();
+                        there = XInputGetStateEx((uint)slot, ref st) == 0;
+                        g = st.Pad;
+                    }
+                    else
+                    {
+                        there = Joy.Read(joy, raw);
+                        if (there) g = map.Apply(raw);
+                    }
+                    if (!there)
+                    {
+                        slot = joy = -1;
+                        nextSearch = now + 1500;
                         Send(pipe, frame, 'N', new Gamepad());
                     }
-                    else if (!haveLast || st.Packet != lastPacket)
+                    // Only real changes are sent: pads count up even when nothing moves.
+                    else if (!haveLast || !g.Same(last))
                     {
-                        lastPacket = st.Packet;
+                        last = g;
                         haveLast = true;
-                        Send(pipe, frame, 'S', st.Pad);
+                        lastMove = now;
+                        Send(pipe, frame, 'S', g);
                     }
                 }
                 ApplyRumble(slot, now);
-                Thread.Sleep(2);
+                // Fast while playing, relaxed when the pad has been still for a while.
+                long still = now - lastMove;
+                Thread.Sleep(slot < 0 && joy < 0 ? 100 : still < 3000 ? 4 : still < 20000 ? 10 : 20);
             }
         }
         catch (IOException) { }     // the relay went away; its messages say why
@@ -805,6 +837,17 @@ static class Program
         return -1;
     }
 
+    // For the window: 0 none, 1 XInput, 2 DirectInput with saved buttons, 3 DirectInput with the usual order.
+    internal static int PadKind(out string id)
+    {
+        id = null;
+        if (FirstPad() >= 0) return 1;
+        if (Joy.Find(out id) < 0) return 0;
+        bool saved;
+        PadMap.Load(id, out saved);
+        return saved ? 2 : 3;
+    }
+
     static readonly KeyValuePair<int, string>[] Names =
     {
         new KeyValuePair<int, string>(0x1000, "A"), new KeyValuePair<int, string>(0x2000, "B"),
@@ -822,18 +865,27 @@ static class Program
         string last = "";
         while (!stop)
         {
-            int slot = FirstPad();
-            string line = "no gamepad";
+            int slot = FirstPad(), joy = -1;
+            string line = "no gamepad", id = null;
+            var g = new Gamepad();
             if (slot >= 0)
             {
                 var s = new State();
                 XInputGetStateEx((uint)slot, ref s);
-                line = string.Format("L({0,6},{1,6}) R({2,6},{3,6}) LT {4,3} RT {5,3}  {6}", s.Pad.LX, s.Pad.LY, s.Pad.RX, s.Pad.RY,
-                    s.Pad.LT, s.Pad.RT, string.Join(" ", Names.Where(n => (s.Pad.Buttons & n.Key) != 0).Select(n => n.Value)));
+                g = s.Pad;
             }
+            else if ((joy = Joy.Find(out id)) >= 0)
+            {
+                bool saved;
+                var r = new RawPad();
+                if (Joy.Read(joy, r)) g = PadMap.Load(id, out saved).Apply(r);
+            }
+            if (slot >= 0 || joy >= 0)
+                line = string.Format("{7} L({0,6},{1,6}) R({2,6},{3,6}) LT {4,3} RT {5,3}  {6}", g.LX, g.LY, g.RX, g.RY, g.LT, g.RT,
+                    string.Join(" ", Names.Where(n => (g.Buttons & n.Key) != 0).Select(n => n.Value)), slot >= 0 ? "XInput" : "DirectInput " + id);
             if (line != last) Say(line);
             last = line;
-            Thread.Sleep(slot < 0 ? 500 : 20);
+            Thread.Sleep(slot < 0 && joy < 0 ? 1000 : slot < 0 ? 60 : 20);
         }
         return 0;
     }
@@ -841,7 +893,7 @@ static class Program
     static int TestRumble()
     {
         int slot = FirstPad();
-        if (slot < 0) { Say("no gamepad"); return 1; }
+        if (slot < 0) { Say("Rumble needs an XInput gamepad."); return 1; }
         foreach (var step in new[] { new { Name = "STRONG (left) motor", S = 65535, W = 0 }, new { Name = "WEAK (right) motor", S = 0, W = 65535 }, new { Name = "BOTH", S = 65535, W = 65535 } })
         {
             if (stop) break;

@@ -14,9 +14,10 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus python3-dbus python3-gi
       - run: bash -n linux/*.sh windows/in_wsl.sh
-      # The USB relay test also needs /dev/uinput, so it is run by hand.
+      # test_usb_relay and test_other_pads also need /dev/uinput, so they are run by hand.
       - run: sudo /usr/bin/python3 linux/tests/test_pairing.py "$PWD/linux" "$PWD/linux/tests"
       - run: sudo /usr/bin/python3 linux/tests/test_windows_input.py "$PWD/linux" "$PWD/linux/tests"
+      - run: /usr/bin/python3 linux/tests/test_app.py "$PWD/linux" "$PWD/linux/tests"
 
   windows:
     runs-on: windows-latest
@@ -25,6 +26,9 @@ jobs:
       - run: windows\build.cmd
         shell: cmd
       - run: windows\keyboard-test\build.cmd
+        shell: cmd
+      - run: |
+          %WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /out:padstest.exe windows\Pads.cs windows\tests\PadsTest.cs && padstest.exe
         shell: cmd
       - uses: actions/upload-artifact@v4
         with:

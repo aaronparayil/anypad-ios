@@ -1,4 +1,4 @@
-# anypad-ios on Windows
+# AnyPad on Windows, for iPhone and iPad
 
 Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as the Bluetooth controller using this PC's adapter. No reboot or Ubuntu stick.
 
@@ -9,7 +9,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 - Windows 11 with WSL 2, and an Ubuntu distro as the **default** WSL distro. In it: `bluez`, `python3-dbus` and `python3-gi` (`sudo apt install bluez python3-dbus python3-gi`).
 - [usbipd-win](https://github.com/dorssel/usbipd-win). Its installer opens TCP port 3240 to your local network.
 - An **Intel** USB Bluetooth adapter (`usbipd list` shows `8087:...`). It's found automatically. Others are refused.
-- An Xbox 360-type (XInput) gamepad.
+- A gamepad: XInput, or any DirectInput pad with at least 4 buttons and 2 axes. DirectInput pads start with the usual button order; use **Gamepad buttons** in AnyPad to teach it yours. Saved in `%LOCALAPPDATA%\anypad-ios\pads.txt`. No rumble for DirectInput.
 
 ## Play
 
@@ -49,7 +49,7 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Known limits
 
-- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in one short session.
+- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in one short session, before its redesign. DirectInput pads haven't been tried with a real pad.
 - Only one adapter, gamepad, PC and iPad tried. The longest session so far was about 24 minutes. Reconnecting without pairing again worked.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
 - The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.
@@ -57,7 +57,8 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Files
 
-- `AnyPad.cs`: the window. `controller.cs`: the engine, used by both programs. `in_wsl.sh`: the WSL side. `make_icon.py` draws `AnyPad.ico`.
+- `AnyPad.cs`, `AnyPadUi.cs`: the window. `controller.cs`: the engine, used by both programs. `Pads.cs`: gamepads. `in_wsl.sh`: the WSL side. `../assets/make_logo.py` draws the logo.
+- `tests/PadsTest.cs`: checks the DirectInput mapping without a gamepad.
 - AnyPad writes the WSL files it carries to `%LOCALAPPDATA%\anypad-ios\app` each time it opens.
 - `keyboard-test/`: a separate experiment, where Windows itself poses as a Bluetooth keyboard. It worked on one phone. Its gamepad mode didn't work as a controller on iOS.
 - `echo_frames.py`: checks the Windows-to-WSL link, with `controller.exe --child "wsl.exe -u root -- python3 <path>"`.

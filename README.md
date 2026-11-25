@@ -1,37 +1,49 @@
-# anypad-ios
+<img src="assets/logo.png" width="96" alt="AnyPad logo: half a gamepad, half wireless waves">
 
-Use a cheap USB or 2.4 GHz gamepad with iPhone/iPad games. A computer reads the gamepad and poses as a Bluetooth LE Xbox controller, which iOS already supports.
+# AnyPad for iPhone and iPad
+
+Use the gamepad you already have, wired or with a 2.4 GHz dongle, to play games on your **iPhone or iPad**. A computer reads the gamepad and poses as a Bluetooth LE Xbox controller, which iOS and iPadOS already support.
 
 ```
-gamepad --(2.4 GHz dongle / USB)--> computer --(Bluetooth LE)--> iPhone / iPad
+gamepad --(USB / 2.4 GHz dongle)--> computer --(Bluetooth LE)--> iPhone / iPad
 ```
 
-No app, jailbreak or extra hardware is needed.
+No app on the iPhone or iPad, no jailbreak, no extra hardware. Games must support controllers.
 
-| Version | How it runs |
+| App | How it runs |
 |---|---|
-| **[Linux](linux/README.md)** | On an installed Linux or an Ubuntu "Try Ubuntu" USB stick |
-| **[Windows](windows/README.md)** | Windows plus WSL, using this PC's Bluetooth; no reboot |
+| **[Windows](windows/README.md)** | `AnyPad.exe`, one file, plus WSL and usbipd-win; uses this PC's Intel Bluetooth |
+| **[Linux](linux/README.md)** | `anypad.py`, or a terminal script; also from an Ubuntu "Try Ubuntu" USB stick |
+
+## Gamepads
+
+| Gamepad | Windows | Linux |
+|---|---|---|
+| XInput (Xbox-type) | Read exactly; rumble sent | Read exactly; rumble sent |
+| DirectInput and other HID pads | Usual button order, or learn the buttons with **Gamepad buttons** | Usual button order; PlayStation and Nintendo drivers understood |
 
 ## Status
 
-Early. Tried on one laptop, one gamepad (Redgear Pro Series) and an iPad or iPhone.
+Early. Tried on one laptop with one gamepad (Redgear Pro Series, XInput) and an iPad and iPhone.
 
 | Feature | Linux | Windows |
 |---|---|---|
-| Pairing, recognised by iOS as a game controller | Works | Works |
+| Pairing, recognised as a game controller | Works | Works |
 | Buttons and sticks in a game | Works | Works |
+| Reconnecting without pairing again | Not tried | Works |
+| Starting and stopping with the app | Window not tried yet | Works; redesigned since, not yet replayed |
+| Other gamepads (DirectInput and so on) | Tested with virtual pads | Mapping tested without a pad |
 | Rumble from games | Reaches the relay; motors unconfirmed | Reaches the relay; motors unconfirmed |
-| Pairing limit (one phone, 3 minutes) | Tested with a stand-in | Works with a real iPad |
-| Clearing an outdated pairing | Tested with a stand-in | Tested with a stand-in |
-| Occasional disconnects | Seen, cause unknown | None in one 24-minute session |
+| Occasional disconnects | Seen, cause unknown | Seen, cause unknown |
 | Xbox trigger rumble, Share button, real battery level | Not supported | Not supported |
 
-Despite the name, only **Xbox 360-type (XInput) pads** are supported for now.
+## Resource use (Windows, measured on that laptop)
+
+While playing with the gamepad still, the engine uses about 0.5 % of one CPU core and 20 MB of memory. The window adds about 28 MB and almost no CPU. WSL itself is separate and uses much more memory.
 
 ## Disclaimer
 
-This is an independent hobby project, not affiliated with or endorsed by Microsoft, Apple, Redgear or Intel. Xbox is a trademark of Microsoft. The controller's name and ID are used only so that iOS recognises the input.
+This is an independent hobby project, not affiliated with or endorsed by Microsoft, Apple, Intel, Redgear or the Bluetooth SIG. Xbox is a trademark of Microsoft; iPhone and iPad are trademarks of Apple. The controller's name and ID are used only so that iOS recognises the input.
 
 ## License
 

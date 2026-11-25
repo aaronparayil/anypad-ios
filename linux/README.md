@@ -1,13 +1,21 @@
-# anypad-ios on Linux
+# AnyPad on Linux, for iPhone and iPad
 
 The gamepad plugs into the Linux laptop, and the laptop poses as a Bluetooth LE Xbox controller. It also runs from an Ubuntu "Try Ubuntu" USB stick, without installing anything.
 
 ## What you need
 
 - A Bluetooth adapter that supports LE peripheral mode. Tried on one laptop: Intel AX211, Ubuntu 24.04 (BlueZ 5.72).
-- An Xbox 360-type (XInput) gamepad. `lsusb` usually shows `045e:028e`.
+- A gamepad. Xbox-type pads are read exactly; other pads use the usual button order, and PlayStation and Nintendo drivers are understood.
 
-## Play
+## Play with the app
+
+```bash
+python3 anypad.py
+```
+
+It needs GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0`; Ubuntu Desktop usually has it). Press **Start**, enter your password, and pair from the iPhone or iPad; press **Stop** when you're done. `bash install-app.sh` adds it to your applications menu. Only the relay runs as root. **The window hasn't been tried on a real desktop yet.**
+
+## Play in a terminal
 
 1. On the phone, open **Settings > Bluetooth** and forget any old *Xbox Wireless Controller*. "Try Ubuntu" loses its pairings at every shutdown.
 2. Plug in the gamepad or dongle, turn it on, and run this in this folder:
@@ -52,4 +60,5 @@ The gamepad plugs into the Linux laptop, and the laptop poses as a Bluetooth LE 
 - `relay.py` reads Linux input events (or the Windows program's input with `--stdin`) and turns them into Xbox input reports.
 - `pairing_test.py` holds the Bluetooth side: a HID-over-GATT service registered with BlueZ over D-Bus, advertising and the pairing limit.
 - `setup.sh` sets BlueZ's `DeviceID` to `045e:0b13`, the ID of the Xbox Series X|S controller. The report layout follows that controller's, but isn't a byte-for-byte copy.
+- `anypad.py` is the window, `app_engine.sh` what it runs as root, `install-app.sh` the menu entry.
 - `tests/` runs the relay against a stand-in for BlueZ and a virtual gamepad. As root on Linux, for example: `python3 tests/test_pairing.py "$PWD" "$PWD/tests"`.

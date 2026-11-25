@@ -33,6 +33,7 @@ static class Gui
             }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Theme.Load();
             Application.Run(new MainForm());
         }
         return 0;
@@ -41,24 +42,27 @@ static class Gui
 
 class Check
 {
+    public bool Shown;
     public Label Mark, Text;
     public LinkLabel Fix;
 }
 
 class MainForm : Form
 {
-    static readonly Color Good = Color.FromArgb(22, 128, 61), Bad = Color.FromArgb(190, 30, 45), Wait = Color.FromArgb(160, 110, 0), Dim = Color.FromArgb(95, 95, 95);
-
+    readonly Header header;
+    readonly PathView path = new PathView();
     readonly Label status = new Label(), hint = new Label();
-    readonly Button main = new Button();
+    readonly BigButton main = new BigButton();
     readonly TextBox log = new TextBox();
-    readonly LinkLabel details = new LinkLabel(), forget = new LinkLabel(), rumble = new LinkLabel();
+    readonly LinkLabel details = new LinkLabel(), forget = new LinkLabel(), rumble = new LinkLabel(), setup = new LinkLabel();
     readonly Dictionary<string, Check> checks = new Dictionary<string, Check>();
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     readonly string files = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "anypad-ios", "app");
 
     Process engine;
-    bool looking, stopping, closeAfter, played, busy, filesOk;
+    bool looking, lookAgain, stopping, closeAfter, played, busy, filesOk, phoneOn, pcOn, padOn;
+    int rows = -1;
+    DateTime lastLook;
     int packages = -1;      // -1 not checked yet, 0 missing, 1 ready, 2 no WSL
     string problem;
 
@@ -67,53 +71,117 @@ class MainForm : Form
         Text = "AnyPad";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Font = new Font("Segoe UI", 9.5f);
-        BackColor = Color.White;
+        BackColor = Theme.Back;
         // All sizes below are for 100 % scaling; Place() enlarges them on sharper screens.
         AutoScaleMode = AutoScaleMode.None;
         using (var g = CreateGraphics()) scale = g.DpiX / 96f;
-        ClientSize = new Size(Px(470), Px(388));
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
 
-        Place(status, 17, 14, 436, 36);
+        header = new Header(Logo());
+        Place(header, 0, 0, 440, 96);
+        Place(path, 10, 112, 420, 84);
+        Place(status, 16, 202, 408, 34);
         status.Font = new Font("Segoe UI Semibold", 15f);
-        Place(hint, 21, 52, 430, 42);
-        hint.ForeColor = Dim;
-        Controls.Add(status);
-        Controls.Add(hint);
+        status.TextAlign = ContentAlignment.MiddleCenter;
+        Place(hint, 24, 236, 392, 42);
+        hint.TextAlign = ContentAlignment.TopCenter;
+        hint.ForeColor = Theme.Dim;
+        Controls.AddRange(new Control[] { header, path, status, hint });
 
-        int y = 106;
-        foreach (var name in new[] { "usbipd", "wsl", "adapter", "bluetooth", "phones", "pad" }) { AddCheck(name, y); y += 31; }
+        foreach (var name in new[] { "usbipd", "wsl", "adapter", "bluetooth", "phones", "pad" }) AddCheck(name);
 
-        Place(main, 20, y + 10, 430, 46);
         main.Font = new Font("Segoe UI Semibold", 12f);
-        main.FlatStyle = FlatStyle.System;
         main.Click += (s, e) => { if (engine == null) Start(); else StopEngine(); };
         Controls.Add(main);
         AcceptButton = main;
 
-        Link(details, "Show details", 20, y + 66, 110, () => ToggleLog());
-        Link(forget, "Forget saved phones", 160, y + 66, 160, () => Forget());
-        Link(rumble, "Test rumble", 340, y + 66, 110, () => TestRumble());
-        rumble.TextAlign = ContentAlignment.TopRight;
+        Link(details, "Details", () => ToggleLog());
+        Link(setup, "Gamepad buttons", () => SetUpPad());
+        Link(rumble, "Test rumble", () => TestRumble());
+        Link(forget, "Forget phones", () => Forget());
 
         log.Multiline = true;
         log.ReadOnly = true;
         log.ScrollBars = ScrollBars.Vertical;
-        log.BackColor = Color.FromArgb(246, 246, 246);
+        log.BorderStyle = BorderStyle.FixedSingle;
+        log.BackColor = Theme.Card;
+        log.ForeColor = Theme.Text;
         log.Font = new Font("Consolas", 8.5f);
-        Place(log, 20, y + 94, 430, 170);
         log.Visible = false;
         log.AccessibleName = "Details";
         Controls.Add(log);
 
-        timer.Interval = 2500;
-        timer.Tick += (s, e) => Look();
-        Shown += (s, e) => { Unpack(); Look(); CheckPackages(); timer.Start(); };
+        // Device changes and coming back to the window trigger a look; the timer is only a fallback.
+        timer.Interval = 20000;
+        timer.Tick += (s, e) => { if (engine == null && WindowState != FormWindowState.Minimized) Look(); };
+        Activated += (s, e) => { if (engine == null && (DateTime.Now - lastLook).TotalSeconds > 2) Look(); };
+        Shown += (s, e) => { Theme.TitleBar(this); Unpack(); Look(); CheckPackages(); timer.Start(); };
         FormClosing += OnClosing;
-        Show("Checking your PC...", Dim, "");
+        setup.Visible = rumble.Visible = forget.Visible = false;
+        Show("Checking your PC...", Theme.Dim, "");
+        Arrange(0);
         Refresh(null);
+    }
+
+    static Image Logo()
+    {
+        using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("logo.png"))
+        using (var img = Image.FromStream(st)) return new Bitmap(img);
+    }
+
+    const int WM_DEVICECHANGE = 0x219;
+    readonly System.Windows.Forms.Timer settle = new System.Windows.Forms.Timer { Interval = 900 };
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_DEVICECHANGE && engine == null && IsHandleCreated)
+        {
+            settle.Stop();
+            settle.Tick -= OnSettled;
+            settle.Tick += OnSettled;
+            settle.Start();
+        }
+        base.WndProc(ref m);
+    }
+
+    void OnSettled(object sender, EventArgs e)
+    {
+        settle.Stop();
+        Look();
+    }
+
+    // Only what needs attention takes up room.
+    void Arrange(int count)
+    {
+        if (count == rows) return;
+        rows = count;
+        int y = 282, n = 0;
+        foreach (var name in checks.Keys)
+        {
+            var c = checks[name];
+            c.Mark.Visible = c.Text.Visible = c.Shown;
+            if (!c.Shown) { c.Fix.Visible = false; continue; }
+            Place(c.Mark, 26, y, 24, 26);
+            Place(c.Text, 50, y + 3, 270, 24);
+            Place(c.Fix, 322, y + 3, 92, 24);
+            y += 30;
+            n++;
+        }
+        y += n > 0 ? 6 : 0;
+        Place(main, 22, y, 396, 48);
+        Place(details, 22, y + 60, 110, 22);
+        Place(setup, 150, y + 60, 140, 22);
+        Place(rumble, 150, y + 60, 140, 22);
+        Place(forget, 308, y + 60, 110, 22);
+        Place(log, 22, y + 90, 396, 160);
+        Fit();
+    }
+
+    void Fit()
+    {
+        ClientSize = new Size(Px(440), (log.Visible ? log.Bottom : details.Bottom) + Px(12));
     }
 
     float scale = 1f;
@@ -128,27 +196,27 @@ class MainForm : Form
         c.SetBounds(Px(x), Px(y), Px(w), Px(h));
     }
 
-    void AddCheck(string name, int y)
+    void AddCheck(string name)
     {
         var c = new Check { Mark = new Label(), Text = new Label(), Fix = new LinkLabel() };
-        Place(c.Mark, 20, y, 24, 24);
         c.Mark.Font = new Font("Segoe UI", 11f, FontStyle.Bold);
-        Place(c.Text, 46, y + 2, 296, 24);
         c.Text.AutoEllipsis = true;
-        Place(c.Fix, 344, y + 2, 106, 24);
+        c.Text.ForeColor = Theme.Text;
+        c.Fix.LinkColor = c.Fix.ActiveLinkColor = Theme.Link;
         c.Fix.TextAlign = ContentAlignment.TopRight;
-        c.Fix.Visible = false;
+        c.Fix.Visible = c.Mark.Visible = c.Text.Visible = false;
         c.Fix.LinkClicked += (s, e) => Fix(name);
-        Controls.Add(c.Mark);
-        Controls.Add(c.Text);
-        Controls.Add(c.Fix);
+        Controls.AddRange(new Control[] { c.Mark, c.Text, c.Fix });
         checks[name] = c;
     }
 
-    void Link(LinkLabel l, string text, int x, int y, int w, Action click)
+    void Link(LinkLabel l, string text, Action click)
     {
         l.Text = text;
-        Place(l, x, y, w, 22);
+        l.LinkColor = l.ActiveLinkColor = Theme.Link;
+        l.DisabledLinkColor = Theme.Dim;
+        l.LinkBehavior = LinkBehavior.HoverUnderline;
+        l.TextAlign = ContentAlignment.TopCenter;
         l.LinkClicked += (s, e) => click();
         Controls.Add(l);
     }
@@ -163,11 +231,12 @@ class MainForm : Form
     void Set(string name, bool? ok, string text, string fix)
     {
         var c = checks[name];
-        c.Mark.Text = ok == null ? "•" : ok.Value ? "✓" : "✗";
-        c.Mark.ForeColor = ok == null ? Dim : ok.Value ? Good : Bad;
+        c.Shown = ok != true && engine == null;
+        c.Mark.Text = ok == null ? "\u2022" : ok.Value ? "\u2713" : "\u2717";
+        c.Mark.ForeColor = ok == null ? Theme.Dim : ok.Value ? Theme.Good : Theme.Bad;
         c.Text.Text = text;
         c.Fix.Text = fix ?? "";
-        c.Fix.Visible = fix != null && engine == null && !busy;
+        c.Fix.Visible = c.Shown && fix != null && !busy;
     }
 
     // ---- The scripts inside this exe ----
@@ -193,13 +262,19 @@ class MainForm : Form
 
     void Look()
     {
-        if (looking) return;
+        if (looking) { lookAgain = true; return; }
         looking = true;
+        lastLook = DateTime.Now;
         Task.Run(() =>
         {
             Program.Checks c = null;
             try { c = Program.Look(); } catch (Exception e) { Post(() => Append("Check failed: " + e.Message)); }
-            Post(() => { looking = false; Refresh(c); });
+            Post(() =>
+            {
+                looking = false;
+                if (c != null) Refresh(c);
+                if (lookAgain) { lookAgain = false; Look(); }
+            });
         });
     }
 
@@ -225,34 +300,47 @@ class MainForm : Form
 
     void Refresh(Program.Checks c)
     {
-        if (c == null)
+        main.Quiet = engine != null;
+        if (c == null || engine != null)
         {
-            foreach (var name in checks.Keys.ToList()) if (checks[name].Text.Text == "") Set(name, null, "Checking...", null);
+            if (engine != null) foreach (var k in checks.Values) k.Shown = false;
             main.Enabled = engine != null && !stopping;
             main.Text = engine == null ? "Start" : stopping ? "Stopping..." : "Stop";
+            main.Invalidate();
+            Arrange(checks.Values.Count(k => k.Shown));
+            path.Set(padOn, pcOn, phoneOn);
             return;
         }
-        Set("pad", c.Pad, c.Pad ? "Gamepad connected" : "No gamepad: plug it in and turn it on", null);
-        if (engine != null) { Refresh(null); return; }
-
-        Set("usbipd", c.Usbipd, c.Usbipd ? "usbipd-win installed" : "usbipd-win is not installed", c.Usbipd ? null : "Get it");
+        padOn = c.Pad > 0;
+        Set("pad", padOn && c.Pad != 3 ? true : padOn ? (bool?)null : false,
+            padOn ? "Gamepad buttons mixed up?" : "No gamepad: plug it in and turn it on", c.Pad == 3 ? "Set up" : null);
+        Set("usbipd", c.Usbipd, "usbipd-win is not installed", "Get it");
         Set("wsl", packages == -1 ? (bool?)null : packages == 1,
-            packages == -1 ? "Checking WSL..." : packages == 1 ? "WSL is ready" : packages == 0 ? "WSL needs 3 packages" : "WSL with Ubuntu is not set up",
+            packages == -1 ? "Checking WSL..." : packages == 0 ? "WSL needs 3 packages" : "WSL with Ubuntu is not set up",
             packages == 0 ? "Install" : packages == 2 ? "How to" : null);
-        Set("adapter", c.Adapters == 1, c.Adapters == 1 ? "Intel Bluetooth adapter found" : c.Adapters > 1 ? "More than one Intel Bluetooth adapter" : c.Usbipd ? "No supported (Intel) Bluetooth adapter" : "Bluetooth adapter not checked yet", null);
+        Set("adapter", c.Adapters == 1, c.Adapters > 1 ? "More than one Intel Bluetooth adapter" : c.Usbipd ? "No supported (Intel) Bluetooth adapter" : "Bluetooth adapter not checked yet", null);
         bool off = c.Radio == "Off" || c.Attached;
-        Set("bluetooth", off, c.Attached ? "Adapter is in use by an earlier run" : off ? "Bluetooth is off in Windows" : c.Radio == null ? "Windows shows no Bluetooth: restart the PC" : "Turn Bluetooth off in Windows",
-            off || c.Radio == null ? null : "Settings");
-        Set("phones", c.Phones.Count == 0, c.Phones.Count == 0 ? "No phone is paired with Windows" : "Remove from Windows: " + string.Join(", ", c.Phones), c.Phones.Count == 0 ? null : "Settings");
+        Set("bluetooth", off, c.Radio == null ? "Windows shows no Bluetooth: restart the PC" : "Turn Bluetooth off in Windows", c.Radio == null ? null : "Settings");
+        Set("phones", c.Phones.Count == 0, "Remove from Windows: " + string.Join(", ", c.Phones), "Settings");
 
         bool ready = filesOk && c.Usbipd && packages == 1 && c.Adapters == 1 && off && c.Phones.Count == 0;
+        pcOn = ready;
+        phoneOn = false;
+        path.Set(padOn, pcOn, phoneOn);
         main.Text = "Start";
         main.Enabled = ready && !busy;
+        main.Invalidate();
+        setup.Visible = c.Pad >= 2;
+        rumble.Visible = c.Pad == 1;
+        forget.Visible = true;
+        // The same number of different rows still needs a new layout.
+        rows = -1;
+        Arrange(checks.Values.Count(k => k.Shown));
         if (busy) return;
-        if (problem != null) Show("It stopped", Bad, problem);
-        else if (ready) Show("Ready to start", Good, c.Attached ? "Start releases the adapter from the earlier run first; then press Start again."
+        if (problem != null) Show("It stopped", Theme.Bad, problem);
+        else if (ready) Show("Ready to start", Theme.Good, c.Attached ? "Start releases the adapter from the earlier run first; then press Start again."
             : c.Audio.Count > 0 ? "Switch off your Bluetooth headphones first; they can block the adapter." : "Windows has no Bluetooth while AnyPad runs.");
-        else Show("Not ready yet", Wait, "Sort out the items marked ✗ below.");
+        else Show("Almost there", Theme.Wait, "Sort out the items marked \u2717 below.");
     }
 
     void Fix(string name)
@@ -261,6 +349,7 @@ class MainForm : Form
         else if (name == "bluetooth" || name == "phones") Open("ms-settings:bluetooth");
         else if (name == "wsl" && packages == 2) Open("https://learn.microsoft.com/windows/wsl/install");
         else if (name == "wsl") InstallPackages();
+        else if (name == "pad") SetUpPad();
     }
 
     void InstallPackages()
@@ -268,7 +357,7 @@ class MainForm : Form
         if (MessageBox.Show(this, "This installs bluez, python3-dbus and python3-gi in your default WSL distro, from Ubuntu's own servers.\n\nContinue?",
             "AnyPad", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         busy = true;
-        Show("Installing...", Wait, "This can take a few minutes.");
+        Show("Installing...", Theme.Wait, "This can take a few minutes.");
         checks["wsl"].Fix.Visible = false;
         Task.Run(() =>
         {
@@ -297,10 +386,9 @@ class MainForm : Form
         played = stopping = false;
         log.Clear();
         engine = Launch("--gui --parent " + Process.GetCurrentProcess().Id + " --files \"" + files + "\"", OnLine, OnEngineExit);
-        Show("Starting...", Wait, "Approve the admin prompt. It may be behind other windows.");
+        Show("Starting...", Theme.Wait, "Approve the admin prompt. It may be behind other windows.");
         Refresh(null);
-        foreach (var c in checks.Values) c.Fix.Visible = false;
-        forget.Enabled = rumble.Enabled = false;
+        forget.Visible = rumble.Visible = setup.Visible = false;
     }
 
     Process Launch(string arguments, Action<string> line, Action<int> exited)
@@ -325,7 +413,7 @@ class MainForm : Form
     {
         if (stopping) return;
         stopping = true;
-        Show("Stopping...", Wait, "Approve the admin prompt, so Windows gets its Bluetooth back. It may be behind other windows.");
+        Show("Stopping...", Theme.Wait, "Approve the admin prompt, so Windows gets its Bluetooth back. It may be behind other windows.");
         Refresh(null);
         // Before the relay is up there is nothing listening yet, so keep asking.
         var target = engine;
@@ -341,21 +429,27 @@ class MainForm : Form
         if (line.StartsWith("FAIL") || line.StartsWith("STOP") || line.StartsWith("Windows would not release") || line.StartsWith("Missing packages")
             || line.StartsWith("The adapter was not shared") || line.StartsWith("Not done")) problem = line;
         if (line.StartsWith("Released. Run this again")) problem = "The adapter was left over from an earlier run and is released now. Press Start again.";
+        if (line.Contains("controller connected in Windows")) padOn = true;
+        else if (line.Contains("controller not connected in Windows")) padOn = false;
+        else if (line.Contains("ready: on the phone")) pcOn = true;
+        else if (line.Contains("phone is listening") || (played && line.EndsWith("phone connected"))) phoneOn = true;
+        else if (line.Contains("phone DISCONNECTED")) phoneOn = false;
+        path.Set(padOn, pcOn, phoneOn);
         if (stopping) return;
-        if (line.Contains("ready: on the phone")) Show("Waiting for your iPhone or iPad", Wait, "On it, open Settings > Bluetooth and tap Xbox Wireless Controller.");
-        else if (line.Contains("accepting pairing")) Show("Pairing...", Wait, "Tap Pair on the iPhone or iPad if it asks.");
-        else if (line.Contains("phone is listening") || (played && line.EndsWith("phone connected"))) { played = true; Show("Connected: play!", Good, "Open a game that supports controllers."); }
-        else if (line.EndsWith("phone connected")) Show("Connecting...", Wait, "");
-        else if (line.Contains("phone DISCONNECTED")) Show("Disconnected", Wait, "Open Bluetooth settings on the iPhone or iPad to reconnect.");
-        else if (line.Contains("removed an out-of-date pairing")) Show("Pair it again", Wait, "Forget Xbox Wireless Controller on the iPhone or iPad, then tap it again.");
-        else if (line.Contains("pairing is closed (time is up)") && !played) Show("Pairing closed", Wait, "Press Stop, then Start, to pair a phone. One that is already paired can still connect.");
+        if (line.Contains("ready: on the phone")) Show("Waiting for your iPhone or iPad", Theme.Wait, "On it, open Settings > Bluetooth and tap Xbox Wireless Controller.");
+        else if (line.Contains("accepting pairing")) Show("Pairing...", Theme.Wait, "Tap Pair on the iPhone or iPad if it asks.");
+        else if (line.Contains("phone is listening") || (played && line.EndsWith("phone connected"))) { played = true; Show("Connected: play!", Theme.Good, "Open a game that supports controllers."); }
+        else if (line.EndsWith("phone connected")) Show("Connecting...", Theme.Wait, "");
+        else if (line.Contains("phone DISCONNECTED")) Show("Disconnected", Theme.Wait, "Open Bluetooth settings on the iPhone or iPad to reconnect.");
+        else if (line.Contains("removed an out-of-date pairing")) Show("Pair it again", Theme.Wait, "Forget Xbox Wireless Controller on the iPhone or iPad, then tap it again.");
+        else if (line.Contains("pairing is closed (time is up)") && !played) Show("Pairing closed", Theme.Wait, "Press Stop, then Start, to pair a phone. One that is already paired can still connect.");
     }
 
     void OnEngineExit(int code)
     {
         engine = null;
         stopping = false;
-        forget.Enabled = rumble.Enabled = true;
+        phoneOn = false;
         if (code != 0 && problem == null) problem = "Something went wrong. See the details.";
         if (problem != null) ShowLog();
         if (closeAfter) { Close(); return; }
@@ -387,12 +481,20 @@ class MainForm : Form
         ShowLog();
     }
 
+    void SetUpPad()
+    {
+        string id;
+        int device = Joy.Find(out id);
+        if (device < 0) { Look(); return; }
+        using (var f = new SetupForm(device, id, scale)) f.ShowDialog(this);
+        Look();
+    }
+
     void ToggleLog()
     {
         log.Visible = !log.Visible;
-        details.Text = log.Visible ? "Hide details" : "Show details";
-        int bottom = log.Visible ? log.Bottom : details.Bottom;
-        ClientSize = new Size(ClientSize.Width, bottom + Px(14));
+        details.Text = log.Visible ? "Hide details" : "Details";
+        Fit();
     }
 
     void ShowLog()
