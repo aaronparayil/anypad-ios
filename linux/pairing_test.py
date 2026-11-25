@@ -404,9 +404,11 @@ class PairingGate:
     """
     SETTLE_SECONDS = 5      # let the phone finish exchanging keys before locking
     CLAIM_SECONDS = 40      # a pairing attempt that stalls frees the slot again
+    REPAIR_SECONDS = 8      # a phone pairing again must still be connected after this long
 
-    def __init__(self, adapter_props, seconds):
+    def __init__(self, adapter_props, seconds, bus=None):
         self.props = adapter_props
+        self.bus = bus
         self.seconds = seconds
         self.is_open = False
         self.claimed = None
@@ -455,10 +457,31 @@ class PairingGate:
             self.claimed = device
             self.stop_claim_timer()
             self.claim_timer = GLib.timeout_add_seconds(self.CLAIM_SECONDS, self.release)
-            log("accepting pairing")
+            if self.device_is(device, "Paired"):
+                # BlueZ sends no "Paired" change for a device it already knew.
+                log("accepting pairing again from a known phone")
+                GLib.timeout_add_seconds(self.REPAIR_SECONDS, self.on_repaired, device)
+            else:
+                log("accepting pairing")
             return
         log("REFUSED pairing from %s" % device.split("/")[-1])
         raise Rejected("pairing is closed")
+
+    def device_is(self, device, prop):
+        if self.bus is None:
+            return False
+        try:
+            props = dbus.Interface(self.bus.get_object(BLUEZ, device), DBUS_PROP)
+            return bool(props.Get(DEVICE, prop))
+        except dbus.exceptions.DBusException:
+            return False
+
+    def on_repaired(self, device):
+        if self.is_open and self.claimed == device and self.device_is(device, "Connected"):
+            self.stop_claim_timer()
+            self.is_open = False
+            self.close("a known phone has paired again", force=True)
+        return False
 
     def stop_claim_timer(self):
         if self.claim_timer is not None:
@@ -611,7 +634,7 @@ def main():
     old_alias = adapter_props.Get(ADAPTER, "Alias")
     adapter_props.Set(ADAPTER, "Powered", dbus.Boolean(True))
     adapter_props.Set(ADAPTER, "Alias", dbus.String(DEVICE_NAME))
-    gate = PairingGate(adapter_props, 180)
+    gate = PairingGate(adapter_props, 180, bus)
 
     # ---- GATT database ----
     app = Application(bus)

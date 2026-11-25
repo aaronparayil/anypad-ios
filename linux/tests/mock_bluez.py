@@ -112,11 +112,11 @@ class Dev(dbus.service.Object):
     def PropertiesChanged(self, i, c, inv):
         pass
 
-    paired = True
+    paired = link = False
 
     @dbus.service.method(P, in_signature="ss", out_signature="v")
     def Get(self, i, p):
-        return dbus.Boolean(self.paired)
+        return dbus.Boolean(self.link if p == "Connected" else self.paired)
 
     @dbus.service.method("test.Dev", in_signature="b")
     def SetPaired(self, on):
@@ -124,6 +124,7 @@ class Dev(dbus.service.Object):
 
     @dbus.service.method("test.Dev", in_signature="b")
     def Link(self, on):
+        self.link = bool(on)
         self.PropertiesChanged("org.bluez.Device1", {"Connected": dbus.Boolean(on)}, [])
 
     @dbus.service.method("test.Dev")

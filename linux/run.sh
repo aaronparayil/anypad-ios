@@ -21,7 +21,8 @@ for a in "$@"; do
   esac
 done
 
-if ! grep -qiE '^DeviceID[[:space:]]*=[[:space:]]*usb:045e:' "$CONF"; then
+if ! grep -qiE '^DeviceID[[:space:]]*=[[:space:]]*usb:045e:' "$CONF" ||
+   ! grep -q '^JustWorksRepairing' "$CONF"; then
   bash setup.sh
 fi
 if [ -n "$mode" ]; then

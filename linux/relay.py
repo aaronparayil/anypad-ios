@@ -492,11 +492,11 @@ def power_on(adapter_props):
 class StalePairing:
     """Spots a phone that forgot us while we still have its key.
 
-    BlueZ then reconnects and drops every second or two ("PIN or Key Missing"), which
+    BlueZ then reconnects and drops every few seconds ("PIN or Key Missing"), which
     also stops the phone from pairing again. While pairing is open, the dead entry is
     removed so the phone can pair afresh; otherwise only advice is given.
     """
-    SHORT, COUNT, WITHIN = 4.0, 4, 30.0
+    SHORT, COUNT, WITHIN = 8.0, 4, 60.0
 
     def __init__(self, bus, adapter_path, gate):
         self.bus, self.adapter_path, self.gate = bus, adapter_path, gate
@@ -548,7 +548,7 @@ def run_relay(args):
     if not power_on(adapter_props):
         return 1
     adapter_props.Set(pt.ADAPTER, "Alias", dbus.String(pt.DEVICE_NAME))
-    gate = pt.PairingGate(adapter_props, args.pair_seconds)
+    gate = pt.PairingGate(adapter_props, args.pair_seconds, bus)
 
     # Same services, order and flags as pairing_test.py, which iOS accepted.
     app = pt.Application(bus)

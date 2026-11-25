@@ -26,11 +26,12 @@ if [ ! -f "$BACKUP" ]; then
 fi
 
 echo "== Setting DeviceID = usb:045e:${PID}:0509 in $CONF"
-sudo sed -i '/^[#[:space:]]*DeviceID[[:space:]]*=/d' "$CONF"
+sudo sed -i -e '/^[#[:space:]]*DeviceID[[:space:]]*=/d' -e '/^[#[:space:]]*JustWorksRepairing[[:space:]]*=/d' "$CONF"
 if grep -q '^\[General\]' "$CONF"; then
-  sudo sed -i "/^\[General\]/a DeviceID = usb:045e:${PID}:0509" "$CONF"
+  # "confirm" lets a phone that forgot us pair again; the relay's pairing limit decides.
+  sudo sed -i -e "/^\[General\]/a DeviceID = usb:045e:${PID}:0509\nJustWorksRepairing = confirm" "$CONF"
 else
-  printf '[General]\nDeviceID = usb:045e:%s:0509\n' "$PID" | sudo tee -a "$CONF" >/dev/null
+  printf '[General]\nDeviceID = usb:045e:%s:0509\nJustWorksRepairing = confirm\n' "$PID" | sudo tee -a "$CONF" >/dev/null
 fi
 
 echo "== Restarting Bluetooth"

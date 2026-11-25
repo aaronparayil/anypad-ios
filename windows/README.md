@@ -31,7 +31,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 ## Before you run it
 
 - **Windows has no Bluetooth while it runs.** Earbuds, and Bluetooth mice and keyboards, disconnect.
-- **Network:** usbipd offers a shared adapter to your local network. While it runs, the program adds a firewall rule so only WSL can reach it, and removes the rule and the share when you stop. If the program is killed, the share and the rule both stay until you run and stop it again, or run `usbipd unbind` and delete the rule. If you share the adapter yourself, that rule isn't there. Mirrored WSL networking isn't supported. **The rule is new and hasn't been run on hardware yet.**
+- **Network:** usbipd offers a shared adapter to your local network. While it runs, the program adds a firewall rule so only WSL can reach it, and removes the rule and the share when you stop. If the program is killed, the share and the rule both stay until you run and stop it again, or run `usbipd unbind` and delete the rule. If you share the adapter yourself, that rule isn't there. Mirrored WSL networking isn't supported. Adding the rule and attaching through it worked on the PC above; removing it hasn't been confirmed yet.
 - The admin prompt shows an unknown publisher, because the program isn't signed. Build it yourself if you'd rather not trust a download.
 - Inside WSL it edits `/etc/bluetooth/main.conf` and restores it afterwards.
 - Pairing has no PIN but is limited to one phone for 3 minutes; see [../linux/README.md](../linux/README.md).

@@ -28,7 +28,9 @@ case "$1" in
     # cmac and ecdh must be loaded by hand: the kernel cannot load them itself in WSL.
     for m in vhci-hcd bluetooth cmac ecdh_generic btintel; do modprobe $m || exit 1; done
     [ -f $BACKUP ] || cp $CONF $BACKUP
-    sed -i '/^[#[:space:]]*DeviceID[[:space:]]*=/d' $CONF
+    sed -i -e '/^[#[:space:]]*DeviceID[[:space:]]*=/d' -e '/^[#[:space:]]*JustWorksRepairing[[:space:]]*=/d' $CONF
+    # "confirm" lets a phone that forgot us pair again; the relay's pairing limit decides.
+    sed -i '/^\[General\]/a JustWorksRepairing = confirm' $CONF
     sed -i '/^\[General\]/a DeviceID = usb:045e:0b13:0509' $CONF
     grep -q '^DeviceID = usb:045e:0b13:0509' $CONF && echo "Xbox ID set in WSL's Bluetooth settings"
     ;;
