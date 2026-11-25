@@ -17,10 +17,11 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 2. Remove any phone from Windows' **Settings > Bluetooth & devices**, and turn Bluetooth **off** in Windows. Windows won't release the adapter while one of its own Bluetooth devices is in use; headphones can block it too.
 3. Check with `controller.exe --preflight`, then run `controller.exe`. It explains itself and asks before it starts; Windows asks for admin approval to share the adapter.
 4. On the iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair within 3 minutes.
-5. Stop with `Ctrl+C` and approve the prompt, so the adapter is unshared. Then turn Windows Bluetooth back on.
+5. Press **Q** in the window to stop, and approve the prompt, so the adapter is unshared. `Ctrl+C`, or `controller.exe --stop` from another window, does the same. Don't just close the window: that releases the adapter but leaves it shared. Then turn Windows Bluetooth back on.
 
 | Command | What it does |
 |---|---|
+| `controller.exe --stop` | Stops a running one from another window |
 | `controller.exe --check` | Shows what the gamepad sends; no Bluetooth |
 | `controller.exe --test-rumble` | Runs the gamepad's motors; no Bluetooth |
 | `controller.exe --preflight` | Checks whether it's safe to start; changes nothing |

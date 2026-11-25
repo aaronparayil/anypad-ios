@@ -115,7 +115,7 @@ static class Program
         }
         // Two copies would fight over the same Bluetooth service and neither would work properly.
         bool first;
-        var single = new Mutex(true, "Local\anypad-windows-pairing-test", out first);
+        var single = new Mutex(true, "Local\\anypad-windows-pairing-test", out first);
         if (!first)
         {
             Console.WriteLine("Another copy of this test is running. Stop it with Ctrl+C first.");

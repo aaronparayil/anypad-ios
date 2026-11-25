@@ -1,7 +1,8 @@
 // Plays iPhone/iPad games with an Xbox-type gamepad plugged into this Windows PC.
 // Windows reads the gamepad; the Linux relay in WSL poses as the Bluetooth controller.
 //
-//   controller.exe                 play (asks before taking Bluetooth from Windows)
+//   controller.exe                 play (asks before taking Bluetooth from Windows); Q stops it
+//   controller.exe --stop          stop a running one from another window
 //   controller.exe --check         show what the gamepad is doing
 //   controller.exe --test-rumble   run the gamepad's motors
 //   options: --busid 1-14 (normally found by itself)   --rumble PERCENT   --pair-seconds N
@@ -132,6 +133,7 @@ static class Program
         Console.CancelKeyPress += (s, e) => { e.Cancel = true; stop = true; };
         if (args.Contains("--check")) return Check();
         if (args.Contains("--test-rumble")) return TestRumble();
+        if (args.Contains("--stop")) return AskRunningToStop();
         if (args.Contains("--why")) { Say(WhyRefused(DateTime.Now.AddDays(-1)) ?? "No refusal in the last 24 hours."); return 0; }
         if (args.Contains("--forget"))
             return Run("wsl.exe", "-u root -- bash \"" + Wsl(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"in_wsl.sh"))) + "\" forget");
@@ -151,6 +153,8 @@ static class Program
         var single = new Mutex(true, "Local\\anypad-windows-controller", out first);
         if (!first) { Say("It is already running in another window."); return 3; }
 
+        stopEvent = new EventWaitHandle(false, EventResetMode.ManualReset, StopEventName);
+        stopEvent.Reset();
         StartLog();
         // Closing the window gives a few seconds: at least hand the adapter back to WSL's host.
         keepHandler = type => { if (type == 2 || type == 5 || type == 6) { stop = true; Cleanup(true); } return false; };
@@ -182,6 +186,34 @@ static class Program
     {
         int i = Array.IndexOf(args, name);
         return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    // Ctrl+C does not reach programs in every terminal, so there are other ways to stop.
+    const string StopEventName = "Local\\anypad-windows-controller-stop";
+    static EventWaitHandle stopEvent;
+
+    static void CheckStopRequest()
+    {
+        if (stopEvent != null && stopEvent.WaitOne(0)) { Say("Stopping (asked from another window)..."); stop = true; return; }
+        try
+        {
+            while (!stop && !Console.IsInputRedirected && Console.KeyAvailable)
+            {
+                var k = Console.ReadKey(true);
+                bool ctrlC = k.Key == ConsoleKey.C && (k.Modifiers & ConsoleModifiers.Control) != 0;
+                if (k.Key == ConsoleKey.Q || k.Key == ConsoleKey.Escape || ctrlC) { Say("Stopping..."); stop = true; }
+            }
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    static int AskRunningToStop()
+    {
+        EventWaitHandle running;
+        if (!EventWaitHandle.TryOpenExisting(StopEventName, out running)) { Say("Nothing is running."); return 1; }
+        running.Set();
+        Say("Asked it to stop. Look for the admin prompt; it may be behind other windows.");
+        return 0;
     }
 
     // ---- Play ----
@@ -544,11 +576,18 @@ static class Program
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            StandardOutputEncoding = Encoding.UTF8
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+            // In this window, wsl.exe would switch off Ctrl+C and swallow the keyboard.
+            CreateNoWindow = true
         };
         relay.OutputDataReceived += (s, e) => { if (e.Data != null) OnRelayLine(e.Data); };
+        relay.ErrorDataReceived += (s, e) => { if (e.Data != null) Say(e.Data); };
         relay.Start();
         relay.BeginOutputReadLine();
+        relay.BeginErrorReadLine();
+        Say("Press Q in this window to stop and give Bluetooth back.");
         var pipe = relay.StandardInput.BaseStream;
 
         int slot = -1;
@@ -561,6 +600,7 @@ static class Program
             Send(pipe, frame, 'N', new Gamepad());
             while (!stop && !relay.HasExited)
             {
+                CheckStopRequest();
                 long now = Clock.ElapsedMilliseconds;
                 if (slot < 0 && now >= nextSearch)
                 {
