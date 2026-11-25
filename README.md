@@ -34,7 +34,7 @@ Early. Tried on one laptop with one gamepad (Redgear Pro Series, XInput), mostly
 | Starting and stopping with the app | Window not tried yet | Works |
 | Other gamepads (DirectInput and so on) | Tested with virtual pads | Mapping tested without a pad |
 | Rumble from games | Reaches the relay; motors unconfirmed | Reaches the relay; motors unconfirmed |
-| Occasional disconnects | Seen, cause unknown | Seen, cause unknown |
+| Occasional disconnects | Seen; try `--le-only` | Likely fixed in 0.1.1 by using Bluetooth LE only: none in one 13-minute session |
 | Xbox trigger rumble, Share button, real battery level | Not supported | Not supported |
 
 ## Resource use (Windows, measured on that laptop)

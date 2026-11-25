@@ -34,6 +34,7 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 | `controller.exe --preflight` | Checks whether it's safe to start; changes nothing |
 | `controller.exe --why` | Shows why Windows last refused to release the adapter |
 | `controller.exe --forget` | Moves saved phone pairings aside so a phone can pair afresh |
+| `--dual` | Keeps classic Bluetooth on, as in 0.1.0. Normally only Bluetooth LE is used |
 | `--busid`, `--rumble`, `--pair-seconds` | Adapter bus ID (normally found automatically), rumble strength, pairing time |
 
 ## Before you run it
@@ -49,7 +50,7 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Known limits
 
-- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in a session of about two and a half minutes, with one drop that reconnected in under a second. DirectInput pads haven't been tried with a real pad.
+- AnyPad has been started, paired with an iPad and stopped cleanly on that PC. With Bluetooth LE only (since 0.1.1) it stayed connected for 13 minutes, until the iPad ended the link; before that, short drops were seen. DirectInput pads haven't been tried with a real pad.
 - Only one adapter, gamepad, PC and iPad tried. The longest session so far was about 24 minutes. Reconnecting without pairing again worked.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
 - The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.
