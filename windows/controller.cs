@@ -81,7 +81,38 @@ static class Program
 
     static void Say(string text)
     {
-        lock (Out) Console.WriteLine(text);
+        lock (Out)
+        {
+            Console.WriteLine(text);
+            Note(text);
+        }
+    }
+
+    // Last run's messages, without Bluetooth addresses, so a closed window still leaves a trace.
+    static string logPath;
+
+    static void Note(string text)
+    {
+        if (logPath == null) return;
+        try
+        {
+            text = Regex.Replace(text, @"([0-9A-Fa-f]{2}[:_]){5}[0-9A-Fa-f]{2}", "<address>");
+            File.AppendAllText(logPath, DateTime.Now.ToString("HH:mm:ss ") + text + Environment.NewLine);
+        }
+        catch (Exception) { }
+    }
+
+    static void StartLog()
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "anypad-ios");
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, "last-run.log");
+            File.WriteAllText(path, "anypad-ios run started " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + Environment.NewLine);
+            logPath = path;
+        }
+        catch (Exception) { }
     }
 
     static int Main(string[] args)
@@ -120,6 +151,7 @@ static class Program
         var single = new Mutex(true, "Local\\anypad-windows-controller", out first);
         if (!first) { Say("It is already running in another window."); return 3; }
 
+        StartLog();
         // Closing the window gives a few seconds: at least hand the adapter back to WSL's host.
         keepHandler = type => { if (type == 2 || type == 5 || type == 6) { stop = true; Cleanup(true); } return false; };
         SetConsoleCtrlHandler(keepHandler, true);
@@ -471,18 +503,21 @@ static class Program
         {
             if (cleaned) return;
             cleaned = true;
+            Note("stop: " + (closing ? "window closed" : "normal") + ", attached " + attached + ", rule " + ruleByUs + ", share ours " + sharedByUs);
             StopRelay(closing ? 1500 : 8000);
-            if (attached) Run(Usbipd, "detach --busid " + busId);
+            if (attached) Note("stop: detach exit " + Run(Usbipd, "detach --busid " + busId));
             if (closing) return;
             if (prepared)
             {
                 string script = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"in_wsl.sh"));
-                Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" restore");
+                Note("stop: restore exit " + Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" restore"));
             }
             if (ruleByUs)
             {
                 Say("Giving Bluetooth back to Windows (admin approval again)...");
-                bool done = ElevatedSelf("--admin-stop --busid " + busId + (sharedByUs ? "" : " --keep-share")) == 0;
+                int admin = ElevatedSelf("--admin-stop --busid " + busId + (sharedByUs ? "" : " --keep-share"));
+                Note("stop: admin step exit " + admin);
+                bool done = admin == 0;
                 Say(!done ? "Not done. In an admin terminal run:  usbipd unbind --busid " + busId
                         + "\nUntil then the adapter stays shared, still blocked from your network by the firewall rule."
                     : sharedByUs ? "Done. Turn Bluetooth back on in Windows. If it does not come back within a minute, restart the PC."

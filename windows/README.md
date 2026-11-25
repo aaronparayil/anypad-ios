@@ -35,6 +35,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 - The admin prompt shows an unknown publisher, because the program isn't signed. Build it yourself if you'd rather not trust a download.
 - Inside WSL it edits `/etc/bluetooth/main.conf` and restores it afterwards.
 - Pairing has no PIN but is limited to one phone for 3 minutes; see [../linux/README.md](../linux/README.md).
+- It writes the last run's messages to `%LOCALAPPDATA%nypad-ios\last-run.log`, without Bluetooth addresses. Device names can appear, so check before sharing it.
 - If the program is killed, a guard in WSL releases the adapter. Tested on the PC above: back in 2 seconds.
 - **Don't use usbipd's `--force`.** Repeated forced shares left that PC without a Bluetooth radio until a restart.
 
