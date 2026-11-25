@@ -704,6 +704,23 @@ def run_relay(args):
                             signal_name="PropertiesChanged", arg0=pt.DEVICE,
                             path_keyword="path")
 
+    # Newer BlueZ says why a link dropped, and whether it was the LE or the classic one.
+    def on_drop(reason, message, interface=None, path=None):
+        link = {"org.bluez.Bearer.LE1": "LE link", "org.bluez.Bearer.BREDR1": "classic link"}.get(interface, "phone")
+        log("%s dropped: %s (%s)" % (link, str(reason).rsplit(".", 1)[-1], message))
+
+    def on_bearer_change(interface, changed, invalidated):
+        if "Connected" in changed:
+            log("%s %s" % ("LE link" if str(interface).endswith("LE1") else "classic link",
+                           "up" if changed["Connected"] else "down"))
+
+    for bearer in ("org.bluez.Bearer.LE1", "org.bluez.Bearer.BREDR1"):
+        bus.add_signal_receiver(on_bearer_change, dbus_interface=pt.DBUS_PROP,
+                                signal_name="PropertiesChanged", arg0=bearer)
+    for interface in (pt.DEVICE, "org.bluez.Bearer.LE1", "org.bluez.Bearer.BREDR1"):
+        bus.add_signal_receiver(on_drop, dbus_interface=interface, signal_name="Disconnected",
+                                interface_keyword="interface", path_keyword="path")
+
     def on_adapter_change(interface, changed, invalidated):
         if "Powered" in changed and not changed["Powered"]:
             log("the LAPTOP's Bluetooth was turned off; press Ctrl+C and run again")

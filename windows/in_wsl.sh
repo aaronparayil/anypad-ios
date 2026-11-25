@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside WSL as root. Usage: in_wsl.sh check | install | prepare | run KIT_DIR [SECONDS] | forget | relay KIT_DIR [relay options] | restore
+# Runs inside WSL as root. Usage: in_wsl.sh check | install | prepare [le|dual] | run KIT_DIR [SECONDS] | forget | relay KIT_DIR [relay options] | restore
 CONF=/etc/bluetooth/main.conf
 BACKUP=$CONF.anypad.bak
 VHCI=/sys/devices/platform/vhci_hcd.0
@@ -39,6 +39,9 @@ case "$1" in
     # "confirm" lets a phone that forgot us pair again; the relay's pairing limit decides.
     sed -i '/^\[General\]/a JustWorksRepairing = confirm' $CONF
     sed -i '/^\[General\]/a DeviceID = usb:045e:0b13:0509' $CONF
+    # A gamepad needs only Bluetooth LE. Over classic Bluetooth, iOS also tries audio services.
+    sed -i '/^[#[:space:]]*ControllerMode[[:space:]]*=/d' $CONF
+    [ "${2:-le}" = dual ] || sed -i '/^\[General\]/a ControllerMode = le' $CONF
     grep -q '^DeviceID = usb:045e:0b13:0509' $CONF && echo "Xbox ID set in WSL's Bluetooth settings"
     ;;
   run|relay)
@@ -47,6 +50,13 @@ case "$1" in
     [ -e /sys/class/bluetooth/hci0 ] || { echo "FAIL: Linux did not see the adapter"; dmesg | grep -iE "bluetooth|firmware" | tail -8; exit 1; }
     sleep 2
     systemctl restart bluetooth < /dev/null; sleep 3
+    # btmgmt needs a terminal, so give it one.
+    settings=$(timeout 6 script -qec "btmgmt info" /dev/null < /dev/null 2> /dev/null | grep -m1 "current settings")
+    case "$settings" in
+      *br/edr*) echo "Bluetooth: LE and classic" ;;
+      *" le"*) echo "Bluetooth: LE only" ;;
+      *) echo "Bluetooth: mode not known" ;;
+    esac
     cd "$2" || exit 1
     if [ "$1" = relay ]; then
       shift 2

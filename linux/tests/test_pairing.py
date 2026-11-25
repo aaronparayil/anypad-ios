@@ -185,6 +185,13 @@ flap(t, B, 2, .2); flap(t, B, 1, 8.4); flap(t, B, 2, .2)
 chk("a long connection resets the count", removed(t) == [], removed(t))
 t.stop()
 
+print("== the reason for a drop is logged")
+t = Run()
+t.send("org.bluez", A, "test.Dev.Drop")
+time.sleep(.3)
+o, rc, p = t.stop()
+chk("reason and link", "LE link down" in o and "LE link dropped: Timeout (Connection timeout)" in o and "Traceback" not in o, o[-300:])
+
 print("== pairing closed: advice only")
 t = Run("--pair-seconds", "0")
 t.send("org.bluez", A, "test.Dev.SetPaired", "boolean:true")

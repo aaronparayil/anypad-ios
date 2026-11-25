@@ -7,6 +7,7 @@
 //   controller.exe --test-rumble   run the gamepad's motors
 //   (AnyPad.exe runs this same code with --gui, --parent and --files)
 //   options: --busid 1-14 (normally found by itself)   --rumble PERCENT   --pair-seconds N
+//   --dual                     keep classic Bluetooth on (normally only Bluetooth LE is used)
 //   --show-network             show which network addresses the firewall rule would block
 //   --why                      show why Windows last refused to release the adapter
 //   --forget                   move saved phone pairings aside, so a phone can pair afresh
@@ -116,7 +117,7 @@ static class Program
         catch (Exception) { }
     }
 
-    static bool gui;
+    static bool gui, dual;
     static string filesDir;
     static Process parent;
 
@@ -133,6 +134,7 @@ static class Program
     internal static int Main(string[] args)
     {
         gui = args.Contains("--gui");
+        dual = args.Contains("--dual");
         filesDir = Opt(args, "--files");
         if (gui)
         {
@@ -288,7 +290,7 @@ static class Program
         if (!Ask("Type y to continue (Windows will ask for admin approval) [y/N] ")) { Say("Nothing was changed."); return 0; }
 
         prepared = true;
-        if (Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" prepare") != 0) { Say("FAIL: preparing WSL"); return 1; }
+        if (Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" prepare " + (dual ? "dual" : "le")) != 0) { Say("FAIL: preparing WSL"); return 1; }
         if (stop) return 0;
         // Our rule still being there means an earlier run was cut off, so its share is ours to undo too.
         bool leftover = Quiet("netsh.exe", "advfirewall firewall show rule name=\"" + RuleName + "\"") == 0;

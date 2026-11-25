@@ -127,6 +127,15 @@ class Dev(dbus.service.Object):
         self.link = bool(on)
         self.PropertiesChanged("org.bluez.Device1", {"Connected": dbus.Boolean(on)}, [])
 
+    @dbus.service.signal("org.bluez.Bearer.LE1", signature="ss")
+    def Disconnected(self, reason, message):
+        pass
+
+    @dbus.service.method("test.Dev")
+    def Drop(self):
+        self.PropertiesChanged("org.bluez.Bearer.LE1", {"Connected": dbus.Boolean(False)}, [])
+        self.Disconnected("org.bluez.Reason.Timeout", "Connection timeout")
+
     @dbus.service.method("test.Dev")
     def Pair(self):
         self.PropertiesChanged("org.bluez.Device1", {"Paired": dbus.Boolean(True)}, [])
