@@ -30,8 +30,5 @@ jobs:
         with:
           name: anypad-ios-windows
           path: |
-            windows/controller.exe
-            windows/in_wsl.sh
-            windows/README.md
-            linux/*.py
+            windows/AnyPad.exe
             LICENSE

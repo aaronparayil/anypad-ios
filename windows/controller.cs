@@ -5,6 +5,7 @@
 //   controller.exe --stop          stop a running one from another window
 //   controller.exe --check         show what the gamepad is doing
 //   controller.exe --test-rumble   run the gamepad's motors
+//   (AnyPad.exe runs this same code with --gui, --parent and --files)
 //   options: --busid 1-14 (normally found by itself)   --rumble PERCENT   --pair-seconds N
 //   --show-network             show which network addresses the firewall rule would block
 //   --why                      show why Windows last refused to release the adapter
@@ -84,7 +85,8 @@ static class Program
     {
         lock (Out)
         {
-            Console.WriteLine(text);
+            // The window may be gone; stopping must still go on.
+            try { Console.WriteLine(text); } catch (IOException) { } catch (ObjectDisposedException) { }
             Note(text);
         }
     }
@@ -116,8 +118,35 @@ static class Program
         catch (Exception) { }
     }
 
-    static int Main(string[] args)
+    static bool gui;
+    static string filesDir;
+    static Process parent;
+
+    static string ScriptPath()
     {
+        return Path.Combine(filesDir ?? AppDomain.CurrentDomain.BaseDirectory, "in_wsl.sh");
+    }
+
+    static string KitPath()
+    {
+        return filesDir ?? Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\linux"));
+    }
+
+    internal static int Main(string[] args)
+    {
+        gui = args.Contains("--gui");
+        filesDir = Opt(args, "--files");
+        if (gui)
+        {
+            // A windowed program has no console: write plain UTF-8 to the window that started us.
+            var plain = new UTF8Encoding(false);
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), plain) { AutoFlush = true });
+            int pid;
+            if (int.TryParse(Opt(args, "--parent"), out pid))
+            {
+                try { parent = Process.GetProcessById(pid); } catch (ArgumentException) { }
+            }
+        }
         if (Opt(args, "--busid") != null) busId = Opt(args, "--busid");
         if (busId != null && !Regex.IsMatch(busId, @"^\d+-\d+$")) { Say("--busid must look like 1-14"); return 2; }
         // Run by this program itself, with admin rights, for the few steps that need them.
@@ -136,7 +165,7 @@ static class Program
         if (args.Contains("--stop")) return AskRunningToStop();
         if (args.Contains("--why")) { Say(WhyRefused(DateTime.Now.AddDays(-1)) ?? "No refusal in the last 24 hours."); return 0; }
         if (args.Contains("--forget"))
-            return Run("wsl.exe", "-u root -- bash \"" + Wsl(Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"in_wsl.sh"))) + "\" forget");
+            return Run("wsl.exe", "-u root -- bash \"" + Wsl(ScriptPath()) + "\" forget");
         if (args.Contains("--preflight")) return Preflight(true) ? 0 : 1;
 
         var relayArgs = new List<string>();
@@ -194,7 +223,8 @@ static class Program
 
     static void CheckStopRequest()
     {
-        if (stopEvent != null && stopEvent.WaitOne(0)) { Say("Stopping (asked from another window)..."); stop = true; return; }
+        if (stopEvent != null && stopEvent.WaitOne(0)) { Say(gui ? "Stopping..." : "Stopping (asked from another window)..."); stop = true; return; }
+        if (parent != null && parent.HasExited) { stop = true; return; }
         try
         {
             while (!stop && !Console.IsInputRedirected && Console.KeyAvailable)
@@ -221,9 +251,8 @@ static class Program
     static int Play(string relayArgs)
     {
         if (!File.Exists(Usbipd)) { Say("usbipd-win is not installed."); return 1; }
-        string here = AppDomain.CurrentDomain.BaseDirectory;
-        string script = Path.GetFullPath(Path.Combine(here, @"in_wsl.sh"));
-        string kit = Path.GetFullPath(Path.Combine(here, @"..\linux"));
+        string script = ScriptPath();
+        string kit = KitPath();
         if (!File.Exists(script) || !File.Exists(Path.Combine(kit, "relay.py"))) { Say("Missing " + script + " or the linux folder next to this one."); return 1; }
 
         if (busId == null && !FindAdapter()) return 1;
@@ -306,8 +335,24 @@ static class Program
             Say("STOP: Bluetooth is " + radio + " in Windows. Turn it OFF first (Win+A, then Bluetooth), then run this again.");
             ok = false;
         }
-        var phones = new List<string>();
-        var audio = new List<string>();
+        List<string> phones, audio;
+        FindBlockers(out phones, out audio);
+        if (phones.Count > 0)
+        {
+            Say("STOP: these phones are paired with Windows and have blocked the adapter: " + string.Join(", ", phones)
+                + ". Remove them in Settings > Bluetooth & devices.");
+            ok = false;
+        }
+        if (audio.Count > 0)
+            Say("Note: paired audio devices can block it too if they are in use: " + string.Join(", ", audio.Except(phones)) + ".");
+        if (ok && reportOnly) Say("Ready to start: Bluetooth is off and no phone is paired with Windows.");
+        return ok;
+    }
+
+    internal static void FindBlockers(out List<string> phones, out List<string> audio)
+    {
+        phones = new List<string>();
+        audio = new List<string>();
         try
         {
             // 111F is a phone's hands-free audio; 110A/110B/111E are headphones and music.
@@ -323,16 +368,40 @@ static class Program
                 }
         }
         catch (Exception e) { Say("Could not list Bluetooth devices: " + e.Message); }
-        if (phones.Count > 0)
-        {
-            Say("STOP: these phones are paired with Windows and have blocked the adapter: " + string.Join(", ", phones)
-                + ". Remove them in Settings > Bluetooth & devices.");
-            ok = false;
-        }
-        if (audio.Count > 0)
-            Say("Note: paired audio devices can block it too if they are in use: " + string.Join(", ", audio.Except(phones)) + ".");
-        if (ok && reportOnly) Say("Ready to start: Bluetooth is off and no phone is paired with Windows.");
-        return ok;
+    }
+
+    internal class Checks
+    {
+        public bool Usbipd, Attached, Pad;
+        public int Adapters;
+        public string Radio;
+        public List<string> Phones, Audio;
+    }
+
+    // Everything the window shows; changes nothing.
+    internal static Checks Look()
+    {
+        var c = new Checks { Usbipd = File.Exists(Usbipd), Pad = FirstPad() >= 0 };
+        var intel = UsbLines().Where(l => l.IndexOf("8087:", StringComparison.Ordinal) >= 0
+            && l.IndexOf("bluetooth", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+        c.Adapters = intel.Count;
+        c.Attached = intel.Any(l => l.IndexOf("Attached", StringComparison.OrdinalIgnoreCase) >= 0);
+        try { c.Radio = RadioState().GetAwaiter().GetResult(); } catch (Exception) { c.Radio = null; }
+        FindBlockers(out c.Phones, out c.Audio);
+        return c;
+    }
+
+    internal static bool RequestStop()
+    {
+        EventWaitHandle running;
+        if (!EventWaitHandle.TryOpenExisting(StopEventName, out running)) return false;
+        running.Set();
+        return true;
+    }
+
+    internal static string ToWsl(string path)
+    {
+        return Wsl(path);
     }
 
     static async Task<string> RadioState()
@@ -362,6 +431,7 @@ static class Program
 
     static bool Ask(string question)
     {
+        if (gui) return question.StartsWith("Type y to continue");     // agreed in the window; never retry by itself
         lock (Out) Console.Write(question);
         string answer = Console.ReadLine();
         return !stop && answer != null && answer.Trim().ToLowerInvariant() == "y";
@@ -431,8 +501,31 @@ static class Program
 
     static int Run(string exe, string arguments)
     {
+        if (gui) return RunCaptured(exe, arguments, Say);
         using (var p = Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false }))
         {
+            p.WaitForExit();
+            return p.ExitCode;
+        }
+    }
+
+    // Without a console of our own, a plain start would pop up a black window.
+    internal static int RunCaptured(string exe, string arguments, Action<string> line)
+    {
+        using (var p = new Process())
+        {
+            p.StartInfo = new ProcessStartInfo(exe, arguments)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true,
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+            };
+            p.OutputDataReceived += (o, e) => { if (e.Data != null) line(e.Data); };
+            p.ErrorDataReceived += (o, e) => { if (e.Data != null) line(e.Data); };
+            p.Start();
+            p.StandardInput.Close();
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
             p.WaitForExit();
             return p.ExitCode;
         }
@@ -541,7 +634,7 @@ static class Program
             if (closing) return;
             if (prepared)
             {
-                string script = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"in_wsl.sh"));
+                string script = ScriptPath();
                 Note("stop: restore exit " + Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" restore"));
             }
             if (ruleByUs)
@@ -587,7 +680,7 @@ static class Program
         relay.Start();
         relay.BeginOutputReadLine();
         relay.BeginErrorReadLine();
-        Say("Press Q in this window to stop and give Bluetooth back.");
+        if (!gui) Say("Press Q in this window to stop and give Bluetooth back.");
         var pipe = relay.StandardInput.BaseStream;
 
         int slot = -1;

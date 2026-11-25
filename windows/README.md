@@ -13,14 +13,21 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 
 ## Play
 
-1. Build once with `build.cmd`. It uses the C# compiler that ships with Windows.
-2. Remove any phone from Windows' **Settings > Bluetooth & devices**, and turn Bluetooth **off** in Windows. Windows won't release the adapter while one of its own Bluetooth devices is in use; headphones can block it too.
-3. Check with `controller.exe --preflight`, then run `controller.exe`. It explains itself and asks before it starts; Windows asks for admin approval to share the adapter.
-4. On the iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair within 3 minutes.
-5. Press **Q** in the window to stop, and approve the prompt, so the adapter is unshared. `Ctrl+C`, or `controller.exe --stop` from another window, does the same. Don't just close the window: that releases the adapter but leaves it shared. Then turn Windows Bluetooth back on.
+1. Open **AnyPad.exe**. It's one file, with nothing else to copy. It lists what's ready and what isn't, with a link to fix most of it.
+2. Turn Bluetooth **off** in Windows, and remove any phone from Windows' **Settings > Bluetooth & devices**. Windows won't release the adapter while one of its own Bluetooth devices is in use; headphones can block it too.
+3. Press **Start** and approve the admin prompt.
+4. On the iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair within 3 minutes. When the window says **Connected: play!**, open a game.
+5. Press **Stop** (or close the window) and approve the prompt, so the adapter is unshared. Then turn Windows Bluetooth back on.
+
+To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
+
+### In a terminal
+
+`controller.exe`, from a clone of this repo, is the same engine without the window. Press **Q** to stop it.
 
 | Command | What it does |
 |---|---|
+| `controller.exe` | Plays; explains itself and asks first |
 | `controller.exe --stop` | Stops a running one from another window |
 | `controller.exe --check` | Shows what the gamepad sends; no Bluetooth |
 | `controller.exe --test-rumble` | Runs the gamepad's motors; no Bluetooth |
@@ -42,6 +49,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 
 ## Known limits
 
+- AnyPad's window is new: its checks work on that PC, but Start and Stop haven't been used for a game yet. The engine under it has.
 - Only one adapter, gamepad, PC and iPad tried. Not tested: reconnecting without pairing again, and long sessions.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
 - The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.
@@ -49,6 +57,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 
 ## Files
 
-- `controller.cs`: the Windows program. `in_wsl.sh`: the WSL side.
+- `AnyPad.cs`: the window. `controller.cs`: the engine, used by both programs. `in_wsl.sh`: the WSL side. `make_icon.py` draws `AnyPad.ico`.
+- AnyPad writes the WSL files it carries to `%LOCALAPPDATA%\anypad-ios\app` each time it opens.
 - `keyboard-test/`: a separate experiment, where Windows itself poses as a Bluetooth keyboard. It worked on one phone. Its gamepad mode didn't work as a controller on iOS.
 - `echo_frames.py`: checks the Windows-to-WSL link, with `controller.exe --child "wsl.exe -u root -- python3 <path>"`.

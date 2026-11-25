@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside WSL as root. Usage: in_wsl.sh prepare | run KIT_DIR [SECONDS] | forget | relay KIT_DIR [relay options] | restore
+# Runs inside WSL as root. Usage: in_wsl.sh check | install | prepare | run KIT_DIR [SECONDS] | forget | relay KIT_DIR [relay options] | restore
 CONF=/etc/bluetooth/main.conf
 BACKUP=$CONF.anypad.bak
 VHCI=/sys/devices/platform/vhci_hcd.0
@@ -19,6 +19,13 @@ release() {
 }
 SELF=$(readlink -f "$0")
 case "$1" in
+  check)
+    command -v bluetoothctl > /dev/null && python3 -c 'import dbus, gi' 2> /dev/null && echo anypad-packages-ok
+    ;;
+  install)
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y --no-install-recommends bluez python3-dbus python3-gi
+    ;;
   prepare)
     if ! command -v bluetoothctl > /dev/null || ! python3 -c 'import dbus, gi' 2> /dev/null; then
       echo "Missing packages in WSL. Run this in WSL, then start again:"
