@@ -49,7 +49,7 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Known limits
 
-- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in one short session, before its redesign. DirectInput pads haven't been tried with a real pad.
+- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in a session of about two and a half minutes, with one drop that reconnected in under a second. DirectInput pads haven't been tried with a real pad.
 - Only one adapter, gamepad, PC and iPad tried. The longest session so far was about 24 minutes. Reconnecting without pairing again worked.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
 - The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.

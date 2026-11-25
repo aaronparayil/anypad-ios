@@ -24,14 +24,14 @@ No app on the iPhone or iPad, no jailbreak, no extra hardware. Games must suppor
 
 ## Status
 
-Early. Tried on one laptop with one gamepad (Redgear Pro Series, XInput) and an iPad and iPhone.
+Early. Tried on one laptop with one gamepad (Redgear Pro Series, XInput), mostly with an iPad Air. An iPhone should work the same way, but hasn't been confirmed in a game.
 
 | Feature | Linux | Windows |
 |---|---|---|
 | Pairing, recognised as a game controller | Works | Works |
 | Buttons and sticks in a game | Works | Works |
 | Reconnecting without pairing again | Not tried | Works |
-| Starting and stopping with the app | Window not tried yet | Works; redesigned since, not yet replayed |
+| Starting and stopping with the app | Window not tried yet | Works |
 | Other gamepads (DirectInput and so on) | Tested with virtual pads | Mapping tested without a pad |
 | Rumble from games | Reaches the relay; motors unconfirmed | Reaches the relay; motors unconfirmed |
 | Occasional disconnects | Seen, cause unknown | Seen, cause unknown |
