@@ -331,6 +331,66 @@ class PadReader:
                 self.urgent |= self.pad.handle(etype, code, value)
 
 
+class StdinPad:
+    """Gamepad state sent by the Windows program over stdin; rumble goes back on stdout.
+
+    Frames are 14 bytes: 0xA5, then "S" (state) or "N" (no controller), then Windows'
+    XINPUT_GAMEPAD structure. The relay stops when stdin closes.
+    """
+    FRAME = struct.Struct("<BBHBBhhhh")
+    BUTTONS = {0x1000: 0x130, 0x2000: 0x131, 0x4000: 0x133, 0x8000: 0x134,
+               0x0100: 0x136, 0x0200: 0x137, 0x0020: 0x13A, 0x0010: 0x13B,
+               0x0400: 0x13C, 0x0040: 0x13D, 0x0080: 0x13E}
+
+    def __init__(self, pad, on_change, on_end):
+        self.pad, self.on_change, self.on_end = pad, on_change, on_end
+        self.buf = b""
+        self.present = None
+        os.set_blocking(0, False)
+        GLib.io_add_watch(0, GLib.PRIORITY_HIGH, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
+                          self.on_readable)
+
+    def rumble(self, strong, weak, length, repeats=1):
+        print("@rumble %d %d %d" % (strong, weak, length * repeats), flush=True)
+
+    def on_readable(self, fd, condition):
+        try:
+            data = os.read(0, 4096)
+        except BlockingIOError:
+            return True
+        except OSError:
+            data = b""
+        if not data:
+            log("Windows side closed")
+            self.on_end()
+            return False
+        self.feed(data)
+        return True
+
+    def feed(self, data):
+        self.buf += data
+        while len(self.buf) >= self.FRAME.size:
+            magic, kind, buttons, lt, rt, lx, ly, rx, ry = self.FRAME.unpack_from(self.buf)
+            if magic != 0xA5 or kind not in b"SN":
+                self.buf = self.buf[1:]     # out of step: look for the next frame
+                continue
+            self.buf = self.buf[self.FRAME.size:]
+            if (kind == ord("S")) != self.present:
+                self.present = kind == ord("S")
+                log("controller %s" % ("connected in Windows" if self.present else
+                                       "not connected in Windows; released all buttons"))
+            before = (self.pad.buttons(), self.pad.hat())
+            self.pad.reset()
+            if kind == ord("S"):
+                # XInput's stick Y is up-positive; HID wants down-positive.
+                self.pad.axes = {
+                    ABS_X: lx, ABS_Y: ~ly, ABS_RX: rx, ABS_RY: ~ry, ABS_Z: lt, ABS_RZ: rt,
+                    ABS_HAT0X: bool(buttons & 8) - bool(buttons & 4),
+                    ABS_HAT0Y: bool(buttons & 2) - bool(buttons & 1)}
+                self.pad.keys = {k for bit, k in self.BUTTONS.items() if buttons & bit}
+            self.on_change(before != (self.pad.buttons(), self.pad.hat()))
+
+
 class Sender:
     """Sends button changes at once; limits the rate of pure stick/trigger movement."""
 
@@ -429,10 +489,54 @@ def power_on(adapter_props):
     return False
 
 
+class StalePairing:
+    """Spots a phone that forgot us while we still have its key.
+
+    BlueZ then reconnects and drops every second or two ("PIN or Key Missing"), which
+    also stops the phone from pairing again. While pairing is open, the dead entry is
+    removed so the phone can pair afresh; otherwise only advice is given.
+    """
+    SHORT, COUNT, WITHIN = 4.0, 4, 30.0
+
+    def __init__(self, bus, adapter_path, gate):
+        self.bus, self.adapter_path, self.gate = bus, adapter_path, gate
+        self.since, self.drops, self.done = {}, {}, set()
+
+    def connected(self, path, on):
+        now = time.monotonic()
+        if on:
+            self.since[path] = now
+            return
+        start = self.since.pop(path, None)
+        if start is None or now - start >= self.SHORT:
+            self.drops.pop(path, None)
+            return
+        recent = [t for t in self.drops.get(path, []) if now - t < self.WITHIN] + [now]
+        self.drops[path] = recent
+        if len(recent) >= self.COUNT and path not in self.done:
+            self.done.add(path)
+            self.handle(path)
+
+    def handle(self, path):
+        try:
+            props = dbus.Interface(self.bus.get_object(pt.BLUEZ, path), pt.DBUS_PROP)
+            if not props.Get(pt.DEVICE, "Paired"):
+                return
+            if not self.gate.is_open:
+                log("the phone keeps dropping: its saved pairing is probably out of date. "
+                    "Stop, forget this controller on the phone, and run again")
+                return
+            dbus.Interface(self.bus.get_object(pt.BLUEZ, self.adapter_path),
+                           pt.ADAPTER).RemoveDevice(dbus.ObjectPath(path))
+            log("removed an out-of-date pairing. On the phone, forget 'Xbox Wireless Controller' "
+                "if it is listed, then tap it again to pair")
+        except dbus.exceptions.DBusException as e:
+            log("could not clear the old pairing: %s" % e)
+
+
 def run_relay(args):
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    pt.BUS = bus
     pt.check_device_id()
 
     adapter_path = pt.find_adapter(bus)
@@ -444,7 +548,7 @@ def run_relay(args):
     if not power_on(adapter_props):
         return 1
     adapter_props.Set(pt.ADAPTER, "Alias", dbus.String(pt.DEVICE_NAME))
-    adapter_props.Set(pt.ADAPTER, "Pairable", dbus.Boolean(True))
+    gate = pt.PairingGate(adapter_props, args.pair_seconds)
 
     # Same services, order and flags as pairing_test.py, which iOS accepted.
     app = pt.Application(bus)
@@ -491,7 +595,8 @@ def run_relay(args):
                           min(100, weak * args.rumble // 100), length, repeats)
 
     adv = pt.Advertisement(bus)
-    agent = pt.Agent(bus, pt.Agent.PATH)
+    agent = pt.Agent(bus, pt.Agent.PATH, gate)
+    stale = StalePairing(bus, adapter_path, gate)
     keep = (adv, agent)     # held so they stay exported
 
     loop = GLib.MainLoop()
@@ -507,6 +612,7 @@ def run_relay(args):
     agent_mgr = dbus.Interface(bus.get_object(pt.BLUEZ, "/org/bluez"), pt.AGENT_MANAGER)
     agent_mgr.RegisterAgent(pt.Agent.PATH, "NoInputNoOutput")
     agent_mgr.RequestDefaultAgent(pt.Agent.PATH)
+    gate.start()
     gatt_mgr = dbus.Interface(bus.get_object(pt.BLUEZ, adapter_path), pt.GATT_MANAGER)
     adv_mgr = dbus.Interface(bus.get_object(pt.BLUEZ, adapter_path), pt.ADV_MANAGER)
     gatt_mgr.RegisterApplication(
@@ -523,9 +629,10 @@ def run_relay(args):
             if not changed["Connected"]:
                 reader.rumble(0, 0, 0)
             log("phone %s" % ("connected" if changed["Connected"] else "DISCONNECTED"))
+            stale.connected(path, bool(changed["Connected"]))
         if changed.get("Paired"):
             log("phone paired")
-            pt.set_trusted(path)
+            gate.paired(path)
         if changed.get("ServicesResolved"):
             emit(pad.report())
 
@@ -541,7 +648,10 @@ def run_relay(args):
                             signal_name="PropertiesChanged", arg0=pt.ADAPTER)
 
     sender = Sender(pad, emit)
-    reader = PadReader(pad, args.usb_id, sender.update, args.device)
+    if args.stdin:
+        reader = StdinPad(pad, sender.update, loop.quit)
+    else:
+        reader = PadReader(pad, args.usb_id, sender.update, args.device)
     try:
         run_loop(loop)
     finally:
@@ -551,6 +661,7 @@ def run_relay(args):
         sender.update(True)
         for call in (lambda: adv_mgr.UnregisterAdvertisement(pt.Advertisement.PATH),
                      lambda: gatt_mgr.UnregisterApplication(pt.ROOT),
+                     gate.restore,
                      lambda: agent_mgr.UnregisterAgent(pt.Agent.PATH),
                      lambda: adapter_props.Set(pt.ADAPTER, "Alias", old_alias)):
             try:
@@ -569,6 +680,10 @@ def main():
                     help="only run the controller's motors; no Bluetooth")
     ap.add_argument("--rumble", type=int, default=100, metavar="PERCENT",
                     help="rumble strength: 0 is off, 200 is double (default 100)")
+    ap.add_argument("--pair-seconds", type=int, default=180, metavar="N",
+                    help="how long a new phone may pair after start; 0 = never (default 180)")
+    ap.add_argument("--stdin", action="store_true",
+                    help="take the gamepad from the Windows program instead of a USB device")
     ap.add_argument("--usb-id", default="045e:028e", help="controller USB ID (from lsusb)")
     ap.add_argument("--device", help="use this /dev/input/eventN instead of searching")
     args = ap.parse_args()

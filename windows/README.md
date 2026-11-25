@@ -1,0 +1,51 @@
+# anypad-ios on Windows
+
+Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as the Bluetooth controller using this PC's adapter. No reboot or Ubuntu stick.
+
+**Works end to end on one PC and one iPad** (25 Nov 2026): an Intel AX211 adapter, WSL 3.0.3, Ubuntu 26.04 (BlueZ 5.85) and a Redgear Pro Series controller. Not tried anywhere else.
+
+## What you need
+
+- Windows 11 with WSL 2, and an Ubuntu distro as the **default** WSL distro. In it: `bluez`, `python3-dbus` and `python3-gi` (`sudo apt install bluez python3-dbus python3-gi`).
+- [usbipd-win](https://github.com/dorssel/usbipd-win). Its installer opens TCP port 3240 to your local network.
+- An **Intel** USB Bluetooth adapter (`usbipd list` shows `8087:...`). Others are refused.
+- An Xbox 360-type (XInput) gamepad.
+
+## Play
+
+1. Build once with `build.cmd`. It uses the C# compiler that ships with Windows.
+2. Remove any phone from Windows' **Settings > Bluetooth & devices**, and turn Bluetooth **off** in Windows. Windows won't release the adapter while one of its own Bluetooth devices is in use; headphones can block it too.
+3. Check with `controller.exe --preflight`, then run `controller.exe`. It explains itself and asks before it starts; Windows asks for admin approval to share the adapter.
+4. On the iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair within 3 minutes.
+5. Stop with `Ctrl+C` and approve the prompt, so the adapter is unshared. Then turn Windows Bluetooth back on.
+
+| Command | What it does |
+|---|---|
+| `controller.exe --check` | Shows what the gamepad sends; no Bluetooth |
+| `controller.exe --test-rumble` | Runs the gamepad's motors; no Bluetooth |
+| `controller.exe --preflight` | Checks whether it's safe to start; changes nothing |
+| `controller.exe --why` | Shows why Windows last refused to release the adapter |
+| `controller.exe --forget` | Moves saved phone pairings aside so a phone can pair afresh |
+| `--busid`, `--rumble`, `--pair-seconds` | Adapter bus ID (default `1-14`), rumble strength, pairing time |
+
+## Before you run it
+
+- **Windows has no Bluetooth while it runs.** Earbuds, and Bluetooth mice and keyboards, disconnect.
+- **While the adapter is shared, other devices on your network could try to use it.** Avoid public Wi-Fi. It's unshared when you stop, unless it was already shared before.
+- Inside WSL it edits `/etc/bluetooth/main.conf` and restores it afterwards.
+- Pairing has no PIN but is limited to one phone for 3 minutes; see [../linux/README.md](../linux/README.md).
+- If the program is killed, a guard in WSL releases the adapter. Tested on the PC above: back in 2 seconds.
+- **Don't use usbipd's `--force`.** Repeated forced shares left that PC without a Bluetooth radio until a restart.
+
+## Known limits
+
+- Only one adapter, gamepad, PC and iPad tried. Not tested: reconnecting without pairing again, and long sessions.
+- Clearing an outdated pairing automatically is only tested with a stand-in.
+- The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.
+- Releasing an adapter left attached by an earlier run hasn't been tried on hardware.
+
+## Files
+
+- `controller.cs`: the Windows program. `in_wsl.sh`: the WSL side.
+- `keyboard-test/`: a separate experiment, where Windows itself poses as a Bluetooth keyboard. It worked on one phone. Its gamepad mode didn't work as a controller on iOS.
+- `echo_frames.py`: checks the Windows-to-WSL link, with `controller.exe --child "wsl.exe -u root -- python3 <path>"`.

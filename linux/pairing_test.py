@@ -14,6 +14,7 @@ import os
 import signal
 import struct
 import sys
+import time
 
 import dbus
 import dbus.exceptions
@@ -389,9 +390,140 @@ class Advertisement(dbus.service.Object):
         log("advertisement released by BlueZ")
 
 
+class Rejected(dbus.exceptions.DBusException):
+    _dbus_error_name = "org.bluez.Error.Rejected"
+
+
+class PairingGate:
+    """Lets one phone pair, for a limited time after start, and nothing else.
+
+    Two layers, because either alone has a gap: the agent refuses requests, and the
+    adapter's Pairable switch is turned off. The kernel can accept classic Bluetooth
+    "Just Works" pairings without asking the agent, so the switch has to go off too.
+    A phone that is already paired can reconnect at any time.
+    """
+    SETTLE_SECONDS = 5      # let the phone finish exchanging keys before locking
+    CLAIM_SECONDS = 40      # a pairing attempt that stalls frees the slot again
+
+    def __init__(self, adapter_props, seconds):
+        self.props = adapter_props
+        self.seconds = seconds
+        self.is_open = False
+        self.claimed = None
+        self.claim_timer = None
+        self.old_pairable = bool(adapter_props.Get(ADAPTER, "Pairable"))
+        # Closed until start(), so nothing can pair before the agent is in place.
+        self.set_pairable(False)
+
+    def set_pairable(self, on):
+        # BlueZ answers Busy while a previous change is still being applied.
+        for attempt in range(20):
+            try:
+                self.props.Set(ADAPTER, "Pairable", dbus.Boolean(on))
+                return
+            except dbus.exceptions.DBusException as e:
+                busy = e.get_dbus_name() in ("org.bluez.Error.Busy", "org.bluez.Error.InProgress",
+                                             "org.bluez.Error.NotReady")
+                if not busy or attempt == 19:
+                    raise
+                time.sleep(0.15)
+
+    def start(self):
+        if self.seconds <= 0:
+            log("pairing is off: only a phone that is already paired can connect")
+            return
+        try:
+            self.set_pairable(True)
+        except dbus.exceptions.DBusException as e:
+            log("FAIL: could not open pairing (%s); run again" % e)
+            return
+        self.is_open = True
+        log("pairing is open for %d seconds, for one phone" % self.seconds)
+        GLib.timeout_add_seconds(self.seconds, self.on_timeout)
+
+    def on_timeout(self, final=False):
+        if self.claimed and self.is_open and not final:
+            # A phone is mid-pairing: let that one finish, once, before closing.
+            GLib.timeout_add_seconds(self.CLAIM_SECONDS, self.on_timeout, True)
+        else:
+            self.close("time is up")
+        return False
+
+    def allow(self, device):
+        device = str(device)
+        if self.is_open and self.claimed in (None, device):
+            self.claimed = device
+            self.stop_claim_timer()
+            self.claim_timer = GLib.timeout_add_seconds(self.CLAIM_SECONDS, self.release)
+            log("accepting pairing")
+            return
+        log("REFUSED pairing from %s" % device.split("/")[-1])
+        raise Rejected("pairing is closed")
+
+    def stop_claim_timer(self):
+        if self.claim_timer is not None:
+            GLib.source_remove(self.claim_timer)
+            self.claim_timer = None
+
+    def release(self):
+        self.claim_timer = None
+        self.claimed = None
+        return False
+
+    def cancelled(self):
+        self.stop_claim_timer()
+        self.claimed = None
+
+    def paired(self, device):
+        """Some device finished pairing: take no new ones, then lock the adapter."""
+        device = str(device)
+        self.stop_claim_timer()
+        if not self.is_open:
+            log("WARNING: %s paired while pairing was closed. If it isn't yours: "
+                "bluetoothctl remove %s" % (device.split("/")[-1], address_of(device)))
+            return
+        if self.claimed not in (None, device):
+            log("WARNING: %s paired as well. If it isn't yours: bluetoothctl remove %s"
+                % (device.split("/")[-1], address_of(device)))
+        self.is_open = False
+        self.claimed = device
+        GLib.timeout_add_seconds(self.SETTLE_SECONDS, self.on_settled)
+
+    def on_settled(self):
+        self.close("a phone has paired", force=True)
+        return False
+
+    def close(self, why, force=False):
+        if not self.is_open and not force:
+            return
+        self.is_open = False
+        try:
+            self.set_pairable(False)
+            log("pairing is closed (%s); to pair another phone, stop and run again" % why)
+        except dbus.exceptions.DBusException as e:
+            log("WARNING: could not turn pairing off (%s). Stop with Ctrl+C when not in use" % e)
+
+    def restore(self):
+        self.is_open = False
+        self.set_pairable(self.old_pairable)
+
+
+def address_of(device_path):
+    return device_path.split("/")[-1].replace("dev_", "").replace("_", ":")
+
+
 class Agent(dbus.service.Object):
-    """Accepts every pairing request ("Just Works"), like a real controller would."""
+    """Answers pairing requests ("Just Works", like a real controller) as the gate decides.
+
+    Devices are not marked trusted, and every other Bluetooth service on the laptop
+    (audio, files, network) is refused: the controller needs none of them.
+    """
     PATH = ROOT + "/agent"
+
+    def __init__(self, bus, path, gate):
+        super().__init__(bus, path)
+        self.gate = gate
+        self.refused = set()
 
     @dbus.service.method(AGENT)
     def Release(self):
@@ -399,15 +531,18 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(AGENT, in_signature="os")
     def AuthorizeService(self, device, uuid):
-        log("authorized service %s" % uuid)
+        if uuid not in self.refused:
+            self.refused.add(uuid)
+            log("refused other Bluetooth service %s (not needed for the controller)" % uuid)
+        raise Rejected("only the controller is offered")
 
     @dbus.service.method(AGENT, in_signature="o", out_signature="s")
     def RequestPinCode(self, device):
-        return "0000"
+        raise Rejected("not supported")
 
     @dbus.service.method(AGENT, in_signature="o", out_signature="u")
     def RequestPasskey(self, device):
-        return dbus.UInt32(0)
+        raise Rejected("not supported")
 
     @dbus.service.method(AGENT, in_signature="ouq")
     def DisplayPasskey(self, device, passkey, entered):
@@ -415,36 +550,24 @@ class Agent(dbus.service.Object):
 
     @dbus.service.method(AGENT, in_signature="os")
     def DisplayPinCode(self, device, pincode):
-        log("pin code %s" % pincode)
+        raise Rejected("not supported")
 
     @dbus.service.method(AGENT, in_signature="ou")
     def RequestConfirmation(self, device, passkey):
-        log("accepting pairing (passkey %06d)" % passkey)
-        set_trusted(device)
+        self.gate.allow(device)
 
     @dbus.service.method(AGENT, in_signature="o")
     def RequestAuthorization(self, device):
-        log("accepting pairing")
-        set_trusted(device)
+        self.gate.allow(device)
 
     @dbus.service.method(AGENT)
     def Cancel(self):
         log("pairing cancelled")
+        self.gate.cancelled()
 
 
 def log(msg):
     print("[xbox-test] " + msg, flush=True)
-
-
-BUS = None
-
-
-def set_trusted(device_path):
-    try:
-        props = dbus.Interface(BUS.get_object(BLUEZ, device_path), DBUS_PROP)
-        props.Set(DEVICE, "Trusted", dbus.Boolean(True))
-    except dbus.exceptions.DBusException as e:
-        log("could not mark device trusted: %s" % e)
 
 
 def find_adapter(bus):
@@ -470,14 +593,12 @@ def check_device_id():
 
 
 def main():
-    global BUS
     if os.geteuid() != 0:
         log("run with sudo: sudo python3 pairing_test.py")
         sys.exit(1)
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
-    BUS = bus
     check_device_id()
 
     adapter_path = find_adapter(bus)
@@ -490,7 +611,7 @@ def main():
     old_alias = adapter_props.Get(ADAPTER, "Alias")
     adapter_props.Set(ADAPTER, "Powered", dbus.Boolean(True))
     adapter_props.Set(ADAPTER, "Alias", dbus.String(DEVICE_NAME))
-    adapter_props.Set(ADAPTER, "Pairable", dbus.Boolean(True))
+    gate = PairingGate(adapter_props, 180)
 
     # ---- GATT database ----
     app = Application(bus)
@@ -529,7 +650,7 @@ def main():
     Descriptor(output_report, uuid16(0x2908), ["read"], bytes([OUTPUT_REPORT_ID, 0x02]))
 
     adv = Advertisement(bus)
-    agent = Agent(bus, Agent.PATH)
+    agent = Agent(bus, Agent.PATH, gate)
 
     loop = GLib.MainLoop()
 
@@ -542,6 +663,7 @@ def main():
     agent_mgr = dbus.Interface(bus.get_object(BLUEZ, "/org/bluez"), AGENT_MANAGER)
     agent_mgr.RegisterAgent(Agent.PATH, "NoInputNoOutput")
     agent_mgr.RequestDefaultAgent(Agent.PATH)
+    gate.start()
 
     gatt_mgr = dbus.Interface(bus.get_object(BLUEZ, adapter_path), GATT_MANAGER)
     adv_mgr = dbus.Interface(bus.get_object(BLUEZ, adapter_path), ADV_MANAGER)
@@ -562,7 +684,7 @@ def main():
             if key in changed:
                 log("%s %s = %s" % (path.split("/")[-1], key, bool(changed[key])))
         if changed.get("Paired"):
-            set_trusted(path)
+            gate.paired(path)
 
     bus.add_signal_receiver(on_device_change, dbus_interface=DBUS_PROP,
                             signal_name="PropertiesChanged", arg0=DEVICE,
@@ -593,6 +715,7 @@ def main():
         log("cleaning up")
         for call in (lambda: adv_mgr.UnregisterAdvertisement(Advertisement.PATH),
                      lambda: gatt_mgr.UnregisterApplication(ROOT),
+                     gate.restore,
                      lambda: agent_mgr.UnregisterAgent(Agent.PATH),
                      lambda: adapter_props.Set(ADAPTER, "Alias", old_alias)):
             try:

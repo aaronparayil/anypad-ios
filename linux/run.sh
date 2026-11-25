@@ -4,6 +4,7 @@
 #   bash run.sh --check      show controller input only, no Bluetooth
 #   bash run.sh --test-rumble   run the controller's motors only, no Bluetooth
 #   bash run.sh --rumble 0      play with rumble off (200 = double strength)
+#   bash run.sh --pair-seconds 0   no new pairing; only a phone paired earlier
 #   bash run.sh --le-only    switch to Bluetooth LE only, then run (stays until --dual or reboot)
 #   bash run.sh --dual       switch back to the default, then run
 set -euo pipefail
