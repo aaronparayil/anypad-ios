@@ -49,8 +49,8 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Known limits
 
-- AnyPad's window is new: its checks work on that PC, but Start and Stop haven't been used for a game yet. The engine under it has.
-- Only one adapter, gamepad, PC and iPad tried. Not tested: reconnecting without pairing again, and long sessions.
+- AnyPad has been started, paired with an iPad and stopped cleanly on that PC, in one short session.
+- Only one adapter, gamepad, PC and iPad tried. The longest session so far was about 24 minutes. Reconnecting without pairing again worked.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
 - The Xbox button uses an undocumented Windows call. Rumble is sent to the gamepad; whether the motors respond depends on it.
 - Releasing an adapter left attached by an earlier run hasn't been tried on hardware.
