@@ -8,7 +8,7 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 
 - Windows 11 with WSL 2, and an Ubuntu distro as the **default** WSL distro. In it: `bluez`, `python3-dbus` and `python3-gi` (`sudo apt install bluez python3-dbus python3-gi`).
 - [usbipd-win](https://github.com/dorssel/usbipd-win). Its installer opens TCP port 3240 to your local network.
-- An **Intel** USB Bluetooth adapter (`usbipd list` shows `8087:...`). Others are refused.
+- An **Intel** USB Bluetooth adapter (`usbipd list` shows `8087:...`). It's found automatically. Others are refused.
 - An Xbox 360-type (XInput) gamepad.
 
 ## Play
@@ -26,12 +26,13 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 | `controller.exe --preflight` | Checks whether it's safe to start; changes nothing |
 | `controller.exe --why` | Shows why Windows last refused to release the adapter |
 | `controller.exe --forget` | Moves saved phone pairings aside so a phone can pair afresh |
-| `--busid`, `--rumble`, `--pair-seconds` | Adapter bus ID (default `1-14`), rumble strength, pairing time |
+| `--busid`, `--rumble`, `--pair-seconds` | Adapter bus ID (normally found automatically), rumble strength, pairing time |
 
 ## Before you run it
 
 - **Windows has no Bluetooth while it runs.** Earbuds, and Bluetooth mice and keyboards, disconnect.
-- **While the adapter is shared, other devices on your network could try to use it.** Avoid public Wi-Fi. It's unshared when you stop, unless it was already shared before.
+- **Network:** usbipd offers a shared adapter to your local network. While it runs, the program adds a firewall rule so only WSL can reach it, and removes the rule and the share when you stop. If the program is killed, the share and the rule both stay until you run and stop it again, or run `usbipd unbind` and delete the rule. If you share the adapter yourself, that rule isn't there. Mirrored WSL networking isn't supported. **The rule is new and hasn't been run on hardware yet.**
+- The admin prompt shows an unknown publisher, because the program isn't signed. Build it yourself if you'd rather not trust a download.
 - Inside WSL it edits `/etc/bluetooth/main.conf` and restores it afterwards.
 - Pairing has no PIN but is limited to one phone for 3 minutes; see [../linux/README.md](../linux/README.md).
 - If the program is killed, a guard in WSL releases the adapter. Tested on the PC above: back in 2 seconds.

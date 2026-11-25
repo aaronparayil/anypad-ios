@@ -1,0 +1,47 @@
+name: Something doesn't work
+description: Report a problem with the Linux or Windows version
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Before pasting logs, replace Bluetooth addresses (like `AA:BB:CC:DD:EE:FF`), device names and Wi-Fi names with something else.
+  - type: dropdown
+    id: version
+    attributes:
+      label: Version
+      options: [Windows, Linux]
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: "Windows 11 with WSL 3.0.3, or Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter
+      placeholder: "Intel AX211 (8087:0033)"
+  - type: input
+    id: gamepad
+    attributes:
+      label: Gamepad and its USB ID
+      placeholder: "Redgear Pro Series (045e:028e)"
+  - type: input
+    id: phone
+    attributes:
+      label: iPhone or iPad model and iOS version
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: "On Windows, also include controller.exe --preflight and --why"
+      render: text

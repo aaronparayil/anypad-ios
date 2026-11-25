@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus python3-dbus python3-gi
+      - run: bash -n linux/*.sh windows/in_wsl.sh
+      # The USB relay test also needs /dev/uinput, so it is run by hand.
+      - run: sudo /usr/bin/python3 linux/tests/test_pairing.py "$PWD/linux" "$PWD/linux/tests"
+      - run: sudo /usr/bin/python3 linux/tests/test_windows_input.py "$PWD/linux" "$PWD/linux/tests"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: windows\build.cmd
+        shell: cmd
+      - run: windows\keyboard-test\build.cmd
+        shell: cmd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anypad-ios-windows
+          path: |
+            windows/controller.exe
+            windows/in_wsl.sh
+            windows/README.md
+            linux/*.py
+            LICENSE

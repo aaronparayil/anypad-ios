@@ -20,6 +20,11 @@ release() {
 SELF=$(readlink -f "$0")
 case "$1" in
   prepare)
+    if ! command -v bluetoothctl > /dev/null || ! python3 -c 'import dbus, gi' 2> /dev/null; then
+      echo "Missing packages in WSL. Run this in WSL, then start again:"
+      echo "  sudo apt update && sudo apt install -y bluez python3-dbus python3-gi"
+      exit 3
+    fi
     # cmac and ecdh must be loaded by hand: the kernel cannot load them itself in WSL.
     for m in vhci-hcd bluetooth cmac ecdh_generic btintel; do modprobe $m || exit 1; done
     [ -f $BACKUP ] || cp $CONF $BACKUP

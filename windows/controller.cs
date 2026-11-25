@@ -4,7 +4,8 @@
 //   controller.exe                 play (asks before taking Bluetooth from Windows)
 //   controller.exe --check         show what the gamepad is doing
 //   controller.exe --test-rumble   run the gamepad's motors
-//   options: --busid 1-14   --rumble PERCENT   --pair-seconds N
+//   options: --busid 1-14 (normally found by itself)   --rumble PERCENT   --pair-seconds N
+//   --show-network             show which network addresses the firewall rule would block
 //   --why                      show why Windows last refused to release the adapter
 //   --forget                   move saved phone pairings aside, so a phone can pair afresh
 //   --preflight                only check whether it is safe to start; changes nothing
@@ -17,6 +18,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Management;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -70,8 +74,9 @@ static class Program
     static readonly object CleanupLock = new object();
     static volatile bool stop;
     static CtrlHandler keepHandler;
-    static string busId = "1-14";
-    static bool attached, prepared, sharedByUs, cleaned;
+    const string RuleName = "anypad-ios: keep the shared Bluetooth adapter off the network";
+    static string busId;
+    static bool attached, prepared, sharedByUs, ruleByUs, cleaned;
     static Process relay;
 
     static void Say(string text)
@@ -82,7 +87,16 @@ static class Program
     static int Main(string[] args)
     {
         if (Opt(args, "--busid") != null) busId = Opt(args, "--busid");
-        if (!Regex.IsMatch(busId, @"^\d+-\d+$")) { Say("--busid must look like 1-14"); return 2; }
+        if (busId != null && !Regex.IsMatch(busId, @"^\d+-\d+$")) { Say("--busid must look like 1-14"); return 2; }
+        // Run by this program itself, with admin rights, for the few steps that need them.
+        if (args.Contains("--admin-start")) return AdminStart();
+        if (args.Contains("--admin-stop")) return AdminStop(args.Contains("--keep-share"));
+        if (args.Contains("--show-network"))
+        {
+            string blocked = BlockedAddresses();
+            Say(blocked == null ? "WSL's network was not found." : "Blocked for TCP 3240: " + blocked);
+            return blocked == null ? 1 : 0;
+        }
         timeBeginPeriod(1);
         Console.CancelKeyPress += (s, e) => { e.Cancel = true; stop = true; };
         if (args.Contains("--check")) return Check();
@@ -148,6 +162,7 @@ static class Program
         string kit = Path.GetFullPath(Path.Combine(here, @"..\linux"));
         if (!File.Exists(script) || !File.Exists(Path.Combine(kit, "relay.py"))) { Say("Missing " + script + " or the linux folder next to this one."); return 1; }
 
+        if (busId == null && !FindAdapter()) return 1;
         string line = DeviceLine();
         if (line == null) { Say("No USB device " + busId + ". See: usbipd list"); return 1; }
         if (line.IndexOf("8087:", StringComparison.Ordinal) < 0)
@@ -174,27 +189,35 @@ static class Program
         }
         Say("");
         Say("This takes Bluetooth away from Windows until you stop: earbuds, Bluetooth mouse and keyboard disconnect.");
-        Say("While it is shared, other devices on your network could try to use the adapter, so avoid public Wi-Fi.");
+        Say("While it runs, a firewall rule keeps other devices on your network away from the shared adapter.");
         Say("");
         if (!Preflight(false)) return 1;
         Say("Windows cannot release the adapter while one of its own Bluetooth devices is in use.");
-        if (!Ask("Type y to continue" + (shared ? "" : " (Windows will ask for admin approval)") + " [y/N] ")) { Say("Nothing was changed."); return 0; }
-        if (!shared)
-        {
-            if (!Elevated("bind --busid " + busId)) { Say("The adapter was not shared. Nothing was changed."); return 1; }
-            sharedByUs = true;
-            for (int i = 0; i < 20 && !stop; i++)
-            {
-                line = DeviceLine();
-                if (line != null && line.IndexOf("Not shared", StringComparison.OrdinalIgnoreCase) < 0) break;
-                Thread.Sleep(500);
-            }
-        }
-        if (stop) return 0;
+        if (!Ask("Type y to continue (Windows will ask for admin approval) [y/N] ")) { Say("Nothing was changed."); return 0; }
 
         prepared = true;
         if (Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" prepare") != 0) { Say("FAIL: preparing WSL"); return 1; }
         if (stop) return 0;
+        // Our rule still being there means an earlier run was cut off, so its share is ours to undo too.
+        bool leftover = Quiet("netsh.exe", "advfirewall firewall show rule name=\"" + RuleName + "\"") == 0;
+        int admin = ElevatedSelf("--admin-start --busid " + busId);
+        if (admin != 0)
+        {
+            Say(admin == 11 ? "FAIL: WSL's network was not found, so the adapter could not be kept off your network. Mirrored networking mode is not supported."
+                : admin == 10 ? "FAIL: Windows refused the firewall rule, so the adapter was not shared."
+                : "The adapter was not shared. Nothing was changed.");
+            return 1;
+        }
+        ruleByUs = true;
+        sharedByUs = !shared || leftover;
+        for (int i = 0; i < 20 && !stop; i++)
+        {
+            line = DeviceLine();
+            if (line != null && line.IndexOf("Not shared", StringComparison.OrdinalIgnoreCase) < 0) break;
+            Thread.Sleep(500);
+        }
+        if (stop) return 0;
+
         if (!Attach()) return stop ? 0 : 1;
         attached = true;
         if (stop) return 0;
@@ -327,12 +350,19 @@ static class Program
 
     static string DeviceLine()
     {
+        if (busId == null) return UsbLines().FirstOrDefault(l => l.IndexOf("8087:", StringComparison.Ordinal) >= 0);
+        return UsbLines().FirstOrDefault(l => Regex.IsMatch(l, @"^\s*" + Regex.Escape(busId) + @"\s"));
+    }
+
+    static string[] UsbLines()
+    {
+        if (!File.Exists(Usbipd)) return new string[0];
         var p = new Process();
         p.StartInfo = new ProcessStartInfo(Usbipd, "list") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true };
         p.Start();
         string all = p.StandardOutput.ReadToEnd();
         p.WaitForExit();
-        return all.Split('\n').FirstOrDefault(l => Regex.IsMatch(l, @"^\s*" + Regex.Escape(busId) + @"\s"));
+        return all.Split('\n').Where(l => Regex.IsMatch(l, @"^\s*\d+-\d+\s")).ToArray();
     }
 
     static int Run(string exe, string arguments)
@@ -344,18 +374,95 @@ static class Program
         }
     }
 
-    // Windows shows its own admin prompt; nothing is changed if you decline.
-    static bool Elevated(string arguments)
+    // ---- Admin steps. Windows shows its own prompt; nothing is changed if you decline. ----
+
+    static int ElevatedSelf(string arguments)
     {
         try
         {
-            using (var p = Process.Start(new ProcessStartInfo(Usbipd, arguments) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden }))
+            string exe = Process.GetCurrentProcess().MainModule.FileName;
+            using (var p = Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden }))
             {
                 p.WaitForExit();
-                return p.ExitCode == 0;
+                return p.ExitCode;
             }
         }
-        catch (Win32Exception) { return false; }
+        catch (Win32Exception) { return -1; }
+    }
+
+    // Firewall first, then share: the adapter is never offered to the network, even briefly.
+    static int AdminStart()
+    {
+        if (busId == null) return 2;
+        string blocked = BlockedAddresses();
+        if (blocked == null) return 11;
+        Quiet("netsh.exe", "advfirewall firewall delete rule name=\"" + RuleName + "\"");
+        if (Quiet("netsh.exe", "advfirewall firewall add rule name=\"" + RuleName
+            + "\" dir=in action=block protocol=TCP localport=3240 profile=any remoteip=" + blocked) != 0) return 10;
+        int bind = Quiet(Usbipd, "bind --busid " + busId);
+        if (bind != 0) Quiet("netsh.exe", "advfirewall firewall delete rule name=\"" + RuleName + "\"");
+        return bind;
+    }
+
+    static int AdminStop(bool keepShare)
+    {
+        if (busId == null) return 2;
+        // The rule stays if unsharing fails, so a shared adapter is never left open by us.
+        if (!keepShare && Quiet(Usbipd, "unbind --busid " + busId) != 0) return 1;
+        Quiet("netsh.exe", "advfirewall firewall delete rule name=\"" + RuleName + "\"");
+        return 0;
+    }
+
+    static int Quiet(string exe, string arguments)
+    {
+        using (var p = Process.Start(new ProcessStartInfo(exe, arguments) { UseShellExecute = false, CreateNoWindow = true }))
+        {
+            p.WaitForExit();
+            return p.ExitCode;
+        }
+    }
+
+    // Everything except WSL's own virtual network: IPv4 below and above it, and all routable IPv6.
+    static string BlockedAddresses()
+    {
+        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (nic.Name.IndexOf("vEthernet (WSL", StringComparison.OrdinalIgnoreCase) != 0) continue;
+            foreach (var ip in nic.GetIPProperties().UnicastAddresses)
+            {
+                if (ip.Address.AddressFamily != AddressFamily.InterNetwork || ip.IPv4Mask == null) continue;
+                uint mask = ToInt(ip.IPv4Mask), first = ToInt(ip.Address) & mask, last = first | ~mask;
+                // A mask this wide would leave much of the network unblocked.
+                if (mask < 0xFFFF0000u) continue;
+                return "0.0.0.1-" + ToText(first - 1) + "," + ToText(last + 1) + "-255.255.255.254,2000::/3,fc00::/7,fe80::/10";
+            }
+        }
+        return null;
+    }
+
+    static uint ToInt(IPAddress a)
+    {
+        var b = a.GetAddressBytes();
+        return (uint)b[0] << 24 | (uint)b[1] << 16 | (uint)b[2] << 8 | b[3];
+    }
+
+    static string ToText(uint v)
+    {
+        return (v >> 24) + "." + (v >> 16 & 255) + "." + (v >> 8 & 255) + "." + (v & 255);
+    }
+
+    static bool FindAdapter()
+    {
+        var found = UsbLines().Where(l => l.IndexOf("8087:", StringComparison.Ordinal) >= 0
+            && l.IndexOf("bluetooth", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+        if (found.Count == 1)
+        {
+            busId = Regex.Match(found[0], @"^\s*(\d+-\d+)").Groups[1].Value;
+            if (busId.Length > 0) return true;
+        }
+        Say(found.Count > 1 ? "More than one Intel Bluetooth adapter. Choose one with --busid:" : "No Intel Bluetooth adapter found. Other makes are not supported yet. USB devices:");
+        foreach (var l in UsbLines()) Say("  " + l.Trim());
+        return false;
     }
 
     static void Cleanup(bool closing)
@@ -372,14 +479,15 @@ static class Program
                 string script = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"in_wsl.sh"));
                 Run("wsl.exe", "-u root -- bash \"" + Wsl(script) + "\" restore");
             }
-            if (sharedByUs)
+            if (ruleByUs)
             {
                 Say("Giving Bluetooth back to Windows (admin approval again)...");
-                Say(Elevated("unbind --busid " + busId)
-                    ? "Done. Turn Bluetooth back on in Windows. If it does not come back within a minute, restart the PC."
-                    : "Not done. In an admin terminal run:  usbipd unbind --busid " + busId);
+                bool done = ElevatedSelf("--admin-stop --busid " + busId + (sharedByUs ? "" : " --keep-share")) == 0;
+                Say(!done ? "Not done. In an admin terminal run:  usbipd unbind --busid " + busId
+                        + "\nUntil then the adapter stays shared, still blocked from your network by the firewall rule."
+                    : sharedByUs ? "Done. Turn Bluetooth back on in Windows. If it does not come back within a minute, restart the PC."
+                    : "Done. The adapter was shared before this started, so it still is, and the firewall rule is removed. To unshare it, in an admin terminal:  usbipd unbind --busid " + busId);
             }
-            else if (attached) Say("The adapter was already shared before this started, so it still is. To give it back, in an admin terminal:  usbipd unbind --busid " + busId);
         }
     }
 

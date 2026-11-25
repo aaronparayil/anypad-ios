@@ -166,3 +166,4 @@ o, rc, p = t.stop()
 chk("not removed, advice given", "removed an out" not in o and "keeps dropping" in o)
 
 print("ALL PASS" if ok else "SOME FAILED")
+sys.exit(0 if ok else 1)
