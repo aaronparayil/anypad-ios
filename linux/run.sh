@@ -8,12 +8,15 @@
 #   bash run.sh --le-only    switch to Bluetooth LE only, then run (stays until --dual or reboot)
 #   bash run.sh --dual       switch back to the default, then run
 #   bash run.sh --android    for an Android phone or tablet: LE only while it runs, then back
+#   bash run.sh --ios        for an iPhone or iPad (the default, except in the Android download)
 set -euo pipefail
 cd "$(dirname "$0")"
 CONF="${XBOX_BRIDGE_CONF:-/etc/bluetooth/main.conf}"
 
 mode=""
 phone=ios
+# The Android download has a file named "phone" that says android.
+[ "$(cat phone 2> /dev/null)" = android ] && phone=android
 bluetooth=yes
 args=()
 for a in "$@"; do

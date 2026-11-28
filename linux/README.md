@@ -9,7 +9,7 @@ The gamepad plugs into the Linux laptop, and the laptop poses as a Bluetooth LE 
 
 ## Two apps
 
-The release has two downloads with the same files: **AnyPad-Linux-iOS** and **AnyPad-Linux-Android**. The Android one has a file named `phone` that says `android`; that is the only difference. From a clone of this repo, add `--android` to the commands below instead.
+The release has two downloads with the same files: **AnyPad-Linux-iOS** and **AnyPad-Linux-Android**. The Android one has a file named `phone` that says `android`, so its `anypad.py`, `run.sh` and `install-app.sh` are for Android without `--android`; that is the only difference. From a clone of this repo, add `--android` to the commands below instead.
 
 With **Android**, the laptop's Bluetooth is switched to LE only while AnyPad runs, then put back. Otherwise Android may pair over classic Bluetooth, where there's no controller. Bluetooth headphones on the laptop stop working meanwhile.
 

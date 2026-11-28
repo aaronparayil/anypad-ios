@@ -177,5 +177,28 @@ chk("Ctrl+C: Bluetooth still put back", "mode=[ControllerMode = le]" in out and 
 out, code, conf, made = engine("windows-phone", "")
 chk("unknown phone refused", code == 2 and "unknown phone" in out, out)
 
+print("== run.sh picks the phone")
+import shutil
+kit = os.path.join(tmp, "kit")
+shutil.copytree(KIT, kit, ignore=shutil.ignore_patterns("tests"))
+stub("sudo", 'echo "sudo $*"')
+
+
+def run_sh(*args):
+    conf = os.path.join(tmp, "run.conf")
+    with open(conf, "w") as f:
+        f.write("[General]\nDeviceID = usb:045e:0b13:0509\nJustWorksRepairing = confirm\n")
+    e = dict(os.environ, PATH=stubs + ":" + os.environ["PATH"], XBOX_BRIDGE_CONF=conf)
+    return subprocess.run(["bash", os.path.join(kit, "run.sh")] + list(args), env=e, capture_output=True,
+                          text=True, stdin=subprocess.DEVNULL).stdout
+
+
+chk("plain run.sh: iOS", "app_engine.sh play ios" in run_sh(), run_sh())
+chk("run.sh --android", "app_engine.sh play android --rumble 50" in run_sh("--android", "--rumble", "50"), run_sh("--android"))
+open(os.path.join(kit, "phone"), "w").write("android\n")
+chk("Android download: plain run.sh is Android", "app_engine.sh play android" in run_sh(), run_sh())
+chk("Android download: --ios still works", "app_engine.sh play ios" in run_sh("--ios"), run_sh("--ios"))
+chk("--check needs no Bluetooth", "relay.py --check" in run_sh("--check") and "app_engine" not in run_sh("--check"), run_sh("--check"))
+
 print("ALL PASS" if ok else "SOME FAILED")
 sys.exit(0 if ok else 1)
