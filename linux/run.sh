@@ -7,16 +7,22 @@
 #   bash run.sh --pair-seconds 0   no new pairing; only a phone paired earlier
 #   bash run.sh --le-only    switch to Bluetooth LE only, then run (stays until --dual or reboot)
 #   bash run.sh --dual       switch back to the default, then run
+#   bash run.sh --android    for an Android phone or tablet: LE only while it runs, then back
 set -euo pipefail
 cd "$(dirname "$0")"
 CONF="${XBOX_BRIDGE_CONF:-/etc/bluetooth/main.conf}"
 
 mode=""
+phone=ios
+bluetooth=yes
 args=()
 for a in "$@"; do
   case "$a" in
     --le-only) mode=le ;;
     --dual) mode=dual ;;
+    --android) phone=android ;;
+    --ios) phone=ios ;;
+    --check|--test-rumble) bluetooth=no; args+=("$a") ;;
     *) args+=("$a") ;;
   esac
 done
@@ -33,5 +39,9 @@ if [ -n "$mode" ]; then
   sleep 3
 fi
 sudo modprobe xpad || true
+
+if [ "$bluetooth" = yes ]; then
+  exec sudo ${XBOX_BRIDGE_CONF:+XBOX_BRIDGE_CONF="$CONF"} bash app_engine.sh play "$phone" "${args[@]}"
+fi
 
 exec sudo systemd-inhibit --what=idle:sleep:handle-lid-switch --why="Xbox bridge is running"   /usr/bin/python3 relay.py "${args[@]}"

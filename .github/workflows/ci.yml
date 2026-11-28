@@ -13,12 +13,29 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus python3-dbus python3-gi
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dbus python3-dbus python3-gi gir1.2-gtk-3.0 xvfb xauth fonts-noto-color-emoji
       - run: bash -n linux/*.sh windows/in_wsl.sh
       # test_usb_relay and test_other_pads also need /dev/uinput, so they are run by hand.
       - run: sudo /usr/bin/python3 linux/tests/test_pairing.py "$PWD/linux" "$PWD/linux/tests"
       - run: sudo /usr/bin/python3 linux/tests/test_windows_input.py "$PWD/linux" "$PWD/linux/tests"
       - run: /usr/bin/python3 linux/tests/test_app.py "$PWD/linux" "$PWD/linux/tests"
+      - run: sudo /usr/bin/python3 linux/tests/test_android.py "$PWD/linux" "$PWD/linux/tests"
+      # What Android's kernel makes of the controller: needs uhid and the Xbox HID driver.
+      - name: Kernel modules for the Android test
+        run: |
+          sudo modprobe uhid && sudo modprobe hid-microsoft ||
+            { sudo apt-get install -y "linux-modules-extra-$(uname -r)" && sudo modprobe uhid && sudo modprobe hid-microsoft; }
+      - run: sudo REQUIRE_UHID=1 /usr/bin/python3 linux/tests/test_android_hid.py "$PWD/linux" "$PWD/linux/tests"
+      - name: The Linux window, for both phones
+        run: |
+          for phone in ios android; do
+            xvfb-run -a -s "-screen 0 1024x768x24" /usr/bin/python3 linux/tests/test_window.py "$PWD/linux" "$PWD/linux/tests" $phone shots || exit 1
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-window-screenshots
+          path: shots/
 
   windows:
     runs-on: windows-latest
@@ -33,7 +50,8 @@ jobs:
         shell: cmd
       - uses: actions/upload-artifact@v4
         with:
-          name: anypad-ios-windows
+          name: anypad-windows
           path: |
-            windows/AnyPad.exe
+            windows/AnyPad-iOS.exe
+            windows/AnyPad-Android.exe
             LICENSE

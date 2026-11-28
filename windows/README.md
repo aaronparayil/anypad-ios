@@ -1,8 +1,12 @@
-# AnyPad on Windows, for iPhone and iPad
+# AnyPad on Windows, for iPhone, iPad and Android
 
 Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as the Bluetooth controller using this PC's adapter. No reboot or Ubuntu stick.
 
 **Works end to end on one PC and one iPad** (25 Nov 2026): an Intel AX211 adapter, WSL 3.0.3, Ubuntu 26.04 (BlueZ 5.85) and a Redgear Pro Series controller. Not tried anywhere else.
+
+## Two apps
+
+**AnyPad-iOS.exe** is for an iPhone or iPad, **AnyPad-Android.exe** for an Android phone or tablet. They're the same program with different instructions, and only one can be open at a time. Both use only Bluetooth LE.
 
 ## What you need
 
@@ -13,10 +17,10 @@ Windows reads the gamepad and sends it to the Linux relay in WSL, which poses as
 
 ## Play
 
-1. Open **AnyPad.exe**. It's one file, with nothing else to copy. It lists what's ready and what isn't, with a link to fix most of it.
+1. Open **AnyPad-iOS.exe** or **AnyPad-Android.exe**. It's one file, with nothing else to copy. It lists what's ready and what isn't, with a link to fix most of it.
 2. Turn Bluetooth **off** in Windows, and remove any phone from Windows' **Settings > Bluetooth & devices**. Windows won't release the adapter while one of its own Bluetooth devices is in use; headphones can block it too.
 3. Press **Start** and approve the admin prompt.
-4. On the iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair within 3 minutes. When the window says **Connected: play!**, open a game.
+4. Pair within 3 minutes. On an iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth**. On Android, open the Bluetooth settings, tap **Pair new device**, then **Xbox Wireless Controller**. When the window says **Connected: play!**, open a game.
 5. Press **Stop** (or close the window) and approve the prompt, so the adapter is unshared. Then turn Windows Bluetooth back on.
 
 To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
@@ -34,7 +38,8 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 | `controller.exe --preflight` | Checks whether it's safe to start; changes nothing |
 | `controller.exe --why` | Shows why Windows last refused to release the adapter |
 | `controller.exe --forget` | Moves saved phone pairings aside so a phone can pair afresh |
-| `--dual` | Keeps classic Bluetooth on, as in 0.1.0. Normally only Bluetooth LE is used |
+| `--android` | Instructions for an Android phone or tablet |
+| `--dual` | Keeps classic Bluetooth on, as in 0.1.0. Normally only Bluetooth LE is used. Not for Android |
 | `--busid`, `--rumble`, `--pair-seconds` | Adapter bus ID (normally found automatically), rumble strength, pairing time |
 
 ## Before you run it
@@ -44,12 +49,13 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 - The admin prompt shows an unknown publisher, because the program isn't signed. Build it yourself if you'd rather not trust a download.
 - Inside WSL it edits `/etc/bluetooth/main.conf` and restores it afterwards.
 - Pairing has no PIN but is limited to one phone for 3 minutes; see [../linux/README.md](../linux/README.md).
-- It writes the last run's messages to `%LOCALAPPDATA%nypad-ios\last-run.log`, without Bluetooth addresses. Device names can appear, so check before sharing it.
+- It writes the last run's messages to `%LOCALAPPDATA%\anypad-ios\last-run.log`, without Bluetooth addresses. Device names can appear, so check before sharing it.
 - If the program is killed, a guard in WSL releases the adapter. Tested on the PC above: back in 2 seconds.
 - **Don't use usbipd's `--force`.** Repeated forced shares left that PC without a Bluetooth radio until a restart.
 
 ## Known limits
 
+- AnyPad-Android.exe hasn't been tried with an Android device yet.
 - AnyPad has been started, paired with an iPad and stopped cleanly on that PC. With Bluetooth LE only (since 0.1.1) it stayed connected for 13 minutes, until the iPad ended the link; before that, short drops were seen. DirectInput pads haven't been tried with a real pad.
 - Only one adapter, gamepad, PC and iPad tried. The longest session so far was about 24 minutes. Reconnecting without pairing again worked.
 - Clearing an outdated pairing automatically is only tested with a stand-in.
@@ -58,7 +64,7 @@ To build it, run `build.cmd`. It uses the C# compiler that ships with Windows.
 
 ## Files
 
-- `AnyPad.cs`, `AnyPadUi.cs`: the window. `controller.cs`: the engine, used by both programs. `Pads.cs`: gamepads. `in_wsl.sh`: the WSL side. `../assets/make_logo.py` draws the logo.
+- `AnyPad.cs`, `AnyPadUi.cs`: the window. `controller.cs`: the engine, used by all three programs. `Target.cs`: the words for each phone. `Pads.cs`: gamepads. `in_wsl.sh`: the WSL side. `../assets/make_logo.py` draws the logo.
 - `tests/PadsTest.cs`: checks the DirectInput mapping without a gamepad.
 - AnyPad writes the WSL files it carries to `%LOCALAPPDATA%\anypad-ios\app` each time it opens.
 - `keyboard-test/`: a separate experiment, where Windows itself poses as a Bluetooth keyboard. It worked on one phone. Its gamepad mode didn't work as a controller on iOS.

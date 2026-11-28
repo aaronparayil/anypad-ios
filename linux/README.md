@@ -1,4 +1,4 @@
-# AnyPad on Linux, for iPhone and iPad
+# AnyPad on Linux, for iPhone, iPad and Android
 
 The gamepad plugs into the Linux laptop, and the laptop poses as a Bluetooth LE Xbox controller. It also runs from an Ubuntu "Try Ubuntu" USB stick, without installing anything.
 
@@ -7,23 +7,30 @@ The gamepad plugs into the Linux laptop, and the laptop poses as a Bluetooth LE 
 - A Bluetooth adapter that supports LE peripheral mode. Tried on one laptop: Intel AX211, Ubuntu 24.04 (BlueZ 5.72).
 - A gamepad. Xbox-type pads are read exactly; other pads use the usual button order, and PlayStation and Nintendo drivers are understood.
 
+## Two apps
+
+The release has two downloads with the same files: **AnyPad-Linux-iOS** and **AnyPad-Linux-Android**. The Android one has a file named `phone` that says `android`; that is the only difference. From a clone of this repo, add `--android` to the commands below instead.
+
+With **Android**, the laptop's Bluetooth is switched to LE only while AnyPad runs, then put back. Otherwise Android may pair over classic Bluetooth, where there's no controller. Bluetooth headphones on the laptop stop working meanwhile.
+
 ## Play with the app
 
 ```bash
-python3 anypad.py
+python3 anypad.py             # or: python3 anypad.py --android
 ```
 
-It needs GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0`; Ubuntu Desktop usually has it). Press **Start**, enter your password, and pair from the iPhone or iPad; press **Stop** when you're done. `bash install-app.sh` adds it to your applications menu. Only the relay runs as root. **The window hasn't been tried on a real desktop yet.**
+It needs GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0`; Ubuntu Desktop usually has it). Press **Start**, enter your password, and pair from the phone; press **Stop** when you're done. `bash install-app.sh` adds it to your applications menu (`--android` for the Android one). Only the relay runs as root. **The window has been tested on a virtual screen, not on a real desktop yet.**
 
 ## Play in a terminal
 
-1. On the phone, open **Settings > Bluetooth** and forget any old *Xbox Wireless Controller*. "Try Ubuntu" loses its pairings at every shutdown.
+1. On the phone, open its Bluetooth settings and forget any old *Xbox Wireless Controller*. "Try Ubuntu" loses its pairings at every shutdown.
 2. Plug in the gamepad or dongle, turn it on, and run this in this folder:
    ```bash
-   bash run.sh
+   bash run.sh               # iPhone or iPad
+   bash run.sh --android     # Android
    ```
    From the Ubuntu boot stick, copy the folder off first, for example: `cp -r /cdrom/anypad-ios ~/ && cd ~/anypad-ios/linux`.
-3. On the phone, tap **Xbox Wireless Controller** in **Settings > Bluetooth** and pair.
+3. On an iPhone or iPad, tap **Xbox Wireless Controller** in **Settings > Bluetooth**. On Android, open the Bluetooth settings, tap **Pair new device**, then **Xbox Wireless Controller**. Pair.
 4. When the terminal says `phone is listening: play!`, open a game that supports controllers.
 5. Stop with `Ctrl+C`. On an installed Ubuntu, undo the Bluetooth change with `bash restore.sh`.
 
@@ -34,7 +41,8 @@ It needs GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0`; Ubuntu Desktop usu
 | `bash run.sh --rumble 0` | Turns rumble off (`200` doubles it) |
 | `bash run.sh --usb-id 1234:abcd` | Uses a gamepad with a different USB ID |
 | `bash run.sh --pair-seconds 0` | Allows no new pairing, only a phone that paired earlier |
-| `bash run.sh --le-only` | Turns off classic Bluetooth, if the phone treats the laptop as a speaker. Untested with iOS |
+| `bash run.sh --android` | For Android: Bluetooth LE only while it runs, then back |
+| `bash run.sh --le-only` | Turns off classic Bluetooth until `--dual`, if the phone treats the laptop as a speaker |
 | `bash run.sh --dual` | Goes back from `--le-only` |
 
 ## Before you run it
@@ -60,5 +68,5 @@ It needs GTK 3 (`sudo apt install python3-gi gir1.2-gtk-3.0`; Ubuntu Desktop usu
 - `relay.py` reads Linux input events (or the Windows program's input with `--stdin`) and turns them into Xbox input reports.
 - `pairing_test.py` holds the Bluetooth side: a HID-over-GATT service registered with BlueZ over D-Bus, advertising and the pairing limit.
 - `setup.sh` sets BlueZ's `DeviceID` to `045e:0b13`, the ID of the Xbox Series X|S controller. The report layout follows that controller's, but isn't a byte-for-byte copy.
-- `anypad.py` is the window, `app_engine.sh` what it runs as root, `install-app.sh` the menu entry.
-- `tests/` runs the relay against a stand-in for BlueZ and a virtual gamepad. As root on Linux, for example: `python3 tests/test_pairing.py "$PWD" "$PWD/tests"`.
+- `anypad.py` is the window, `app_engine.sh` what it runs as root (and what switches Bluetooth for Android), `install-app.sh` the menu entry. `package.sh` makes the two downloads.
+- `tests/` runs the relay against a stand-in for BlueZ and a virtual gamepad. As root on Linux, for example: `python3 tests/test_pairing.py "$PWD" "$PWD/tests"`. `test_android_hid.py` feeds the controller to the Linux kernel's own HID drivers, as Android does, and maps the result with Android's button layout file; it needs `/dev/uhid`. `test_window.py` drives the real window.

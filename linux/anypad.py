@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""AnyPad for Linux: use any gamepad with your iPhone or iPad.
+"""AnyPad for Linux: use any gamepad with your iPhone, iPad or Android device.
+
+    python3 anypad.py             for an iPhone or iPad
+    python3 anypad.py --android   for an Android phone or tablet
+A file named "phone" next to this one, holding "android", makes --android the default.
 
 A small window around relay.py. It runs as you; only the relay runs as root, through
 the system's own password prompt (pkexec). Needs python3-gi, python3-dbus and GTK 3.
@@ -14,11 +18,33 @@ import threading
 HERE = os.path.dirname(os.path.realpath(__file__))
 GOOD, BAD, WAIT = "good", "bad", "wait"
 
+# The words for each kind of phone. The controller the phone sees is the same.
+PHONES = {
+    "ios": dict(app="AnyPad for iPhone and iPad", phone="iPhone or iPad", short="iPhone / iPad",
+                pair="On it, open Settings > Bluetooth and tap Xbox Wireless Controller."),
+    "android": dict(app="AnyPad for Android", phone="Android phone or tablet", short="Android",
+                    pair="On it, open Bluetooth settings, tap Pair new device, then Xbox Wireless Controller."),
+}
+
+
+def pick_phone(argv):
+    if "--android" in argv:
+        return "android"
+    if "--ios" in argv:
+        return "ios"
+    try:
+        with open(os.path.join(HERE, "phone")) as f:
+            return "android" if f.read().strip().lower() == "android" else "ios"
+    except OSError:
+        return "ios"
+
 
 class Model:
     """What the window shows, worked out from the relay's messages. No GTK in here."""
 
-    def __init__(self):
+    def __init__(self, phone="ios"):
+        self.kind = phone
+        self.words = PHONES[phone]
         self.running = self.stopping = self.played = False
         self.pad = self.laptop = self.phone = False
         self.title, self.hint, self.mood = "Checking...", "", WAIT
@@ -65,15 +91,15 @@ class Model:
         if listening:
             self.show("Connected: play!", "Open a game that supports controllers.", GOOD)
         elif "ready: on the phone" in text:
-            self.show("Waiting for your iPhone or iPad", "On it, open Settings > Bluetooth and tap Xbox Wireless Controller.", WAIT)
+            self.show("Waiting for your " + self.words["phone"], self.words["pair"], WAIT)
         elif "accepting pairing" in text:
-            self.show("Pairing...", "Tap Pair on the iPhone or iPad if it asks.", WAIT)
+            self.show("Pairing...", "Tap Pair on the %s if it asks." % self.words["phone"], WAIT)
         elif text.endswith("phone connected"):
             self.show("Connecting...", "", WAIT)
         elif "phone DISCONNECTED" in text:
-            self.show("Disconnected", "Open Bluetooth settings on the iPhone or iPad to reconnect.", WAIT)
+            self.show("Disconnected", "Open Bluetooth settings on the %s to reconnect." % self.words["phone"], WAIT)
         elif "removed an out-of-date pairing" in text:
-            self.show("Pair it again", "Forget Xbox Wireless Controller on the iPhone or iPad, then tap it again.", WAIT)
+            self.show("Pair it again", "Forget Xbox Wireless Controller on the %s, then pair it again." % self.words["phone"], WAIT)
         elif "pairing is closed (time is up)" in text and not self.played:
             self.show("Pairing closed", "Press Stop, then Start, to pair a phone. One that is already paired can still connect.", WAIT)
 
@@ -97,7 +123,10 @@ class Model:
         if self.problem:
             self.show("It stopped", self.problem, BAD)
         elif ready:
-            self.show("Ready to start", "Only pair your own phone: one can pair without a code, for 3 minutes.", GOOD)
+            hint = "Only pair your own phone: one can pair without a code, for 3 minutes."
+            if self.kind == "android":
+                hint += " Bluetooth on this laptop is LE only while AnyPad runs."
+            self.show("Ready to start", hint, GOOD)
         else:
             self.show("Almost there", "Sort out the items below.", WAIT)
         return ready, todo
@@ -127,8 +156,8 @@ def look():
 class Engine:
     """The relay as root; closing its stdin stops it cleanly."""
 
-    def __init__(self, on_line, on_end, command=None):
-        command = command or ["pkexec", "/bin/bash", os.path.join(HERE, "app_engine.sh"), "run"]
+    def __init__(self, on_line, on_end, command=None, phone="ios"):
+        command = command or ["pkexec", "/bin/bash", os.path.join(HERE, "app_engine.sh"), "run", phone]
         self.p = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
         self.on_line, self.on_end = on_line, on_end
@@ -162,15 +191,16 @@ CSS = b"""
 """
 
 
-def run_window():
+def run_window(phone="ios"):
     import gi
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
     class Window(Gtk.ApplicationWindow):
         def __init__(self, app):
-            super().__init__(application=app, title="AnyPad", resizable=False)
-            self.model, self.engine, self.close_after = Model(), None, False
+            words = PHONES[phone]
+            super().__init__(application=app, title=words["app"], resizable=False)
+            self.model, self.engine, self.close_after = Model(phone), None, False
             icon = os.path.join(HERE, "anypad.png")
             if os.path.exists(icon):
                 self.set_icon_from_file(icon)
@@ -184,10 +214,10 @@ def run_window():
             head.get_style_context().add_class("head")
             if os.path.exists(icon):
                 head.pack_start(Gtk.Image.new_from_pixbuf(GdkPixbuf.Pixbuf.new_from_file_at_size(icon, 56, 56)), False, False, 0)
-            words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
-            words.add(self.label("AnyPad", "name", 0))
-            words.add(self.label("Any gamepad, on your iPhone or iPad", None, 0))
-            head.add(words)
+            names = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+            names.add(self.label("AnyPad", "name", 0))
+            names.add(self.label("Any gamepad, on your " + words["phone"], None, 0))
+            head.add(names)
             box.add(head)
 
             body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=20)
@@ -195,7 +225,7 @@ def run_window():
             box.add(body)
             row = Gtk.Box(halign=Gtk.Align.CENTER, spacing=10)
             self.nodes, self.links = [], []
-            for i, (glyph, text) in enumerate((("\U0001F3AE", "Gamepad"), ("\U0001F4BB", "This laptop"), ("\U0001F4F1", "iPhone / iPad"))):
+            for i, (glyph, text) in enumerate((("\U0001F3AE", "Gamepad"), ("\U0001F4BB", "This laptop"), ("\U0001F4F1", words["short"]))):
                 if i:
                     link = self.label("━━", "link", 0.5)
                     link.set_valign(Gtk.Align.START)
@@ -281,7 +311,7 @@ def run_window():
                 self.log.get_buffer().set_text("")
                 self.model.started()
                 try:
-                    self.engine = Engine(lambda t: GLib.idle_add(self.on_line, t), lambda c: GLib.idle_add(self.on_end, c))
+                    self.engine = Engine(lambda t: GLib.idle_add(self.on_line, t), lambda c: GLib.idle_add(self.on_end, c), phone=phone)
                 except OSError as e:
                     self.model.running = False
                     self.model.problem = str(e)
@@ -333,7 +363,7 @@ def run_window():
 
 if __name__ == "__main__":
     try:
-        sys.exit(run_window())
+        sys.exit(run_window(pick_phone(sys.argv[1:])))
     except (ImportError, ValueError) as e:
         print("AnyPad's window needs GTK 3: sudo apt install python3-gi gir1.2-gtk-3.0 (%s)" % e)
         print("Or play from the terminal: bash run.sh")

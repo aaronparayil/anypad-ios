@@ -60,7 +60,7 @@ class Header : Control
         this.logo = logo;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         SetStyle(ControlStyles.Selectable, false);
-        AccessibleName = "AnyPad. Use any gamepad with your iPhone or iPad.";
+        AccessibleName = "AnyPad. Use any gamepad with your " + Target.Phone + ".";
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -74,11 +74,11 @@ class Header : Control
         using (var w = new SolidBrush(Color.FromArgb(60, 255, 255, 255))) g.FillPath(w, plate);
         g.DrawImage(logo, 23 * k, 21 * k, 54 * k, 54 * k);
         TextRenderer.DrawText(g, "AnyPad", title, new Point((int)(90 * k), (int)(15 * k)), Color.White);
-        TextRenderer.DrawText(g, "Any gamepad, on your iPhone or iPad", sub, new Point((int)(92 * k), (int)(52 * k)), Color.FromArgb(235, 243, 255));
+        TextRenderer.DrawText(g, "Any gamepad, on your " + Target.Phone, sub, new Point((int)(92 * k), (int)(52 * k)), Color.FromArgb(235, 243, 255));
     }
 }
 
-// Gamepad -- this PC -- iPhone or iPad, with the working parts lit.
+// Gamepad -- this PC -- phone, with the working parts lit.
 class PathView : Control
 {
     public bool Pad, Pc, Phone;
@@ -96,7 +96,7 @@ class PathView : Control
         Pad = pad;
         Pc = pc;
         Phone = phone;
-        AccessibleName = "Gamepad " + (pad ? "connected" : "not connected") + ", this PC " + (pc ? "ready" : "not ready") + ", iPhone or iPad " + (phone ? "connected" : "not connected");
+        AccessibleName = "Gamepad " + (pad ? "connected" : "not connected") + ", this PC " + (pc ? "ready" : "not ready") + ", " + Target.Phone + " " + (phone ? "connected" : "not connected");
         Invalidate();
     }
 
@@ -108,7 +108,7 @@ class PathView : Control
         float k = g.DpiX / 96f, r = 25 * k, cy = 30 * k;
         float[] cx = { Width * 0.17f, Width * 0.5f, Width * 0.83f };
         bool[] on = { Pad, Pc, Phone };
-        string[] names = { "Gamepad", "This PC", "iPhone / iPad" };
+        string[] names = { "Gamepad", "This PC", Target.Short };
         for (int i = 0; i < 2; i++)
             using (var pen = new Pen(on[i] && on[i + 1] ? Theme.Good : Theme.Line, 3 * k))
             {

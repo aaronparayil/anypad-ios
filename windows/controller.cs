@@ -1,4 +1,4 @@
-// Plays iPhone/iPad games with a gamepad plugged into this Windows PC.
+// Plays iPhone, iPad or Android games with a gamepad plugged into this Windows PC.
 // Windows reads the gamepad; the Linux relay in WSL poses as the Bluetooth controller.
 //
 //   controller.exe                 play (asks before taking Bluetooth from Windows); Q stops it
@@ -8,6 +8,7 @@
 //   (AnyPad.exe runs this same code with --gui, --parent and --files)
 //   options: --busid 1-14 (normally found by itself)   --rumble PERCENT   --pair-seconds N
 //   --dual                     keep classic Bluetooth on (normally only Bluetooth LE is used)
+//   --android                  instructions for an Android phone or tablet
 //   --show-network             show which network addresses the firewall rule would block
 //   --why                      show why Windows last refused to release the adapter
 //   --forget                   move saved phone pairings aside, so a phone can pair afresh
@@ -135,6 +136,7 @@ static class Program
     {
         gui = args.Contains("--gui");
         dual = args.Contains("--dual");
+        if (args.Contains("--android")) Target.Android = true;
         filesDir = Opt(args, "--files");
         if (gui)
         {
@@ -168,7 +170,7 @@ static class Program
             return Run("wsl.exe", "-u root -- bash \"" + Wsl(ScriptPath()) + "\" forget");
         if (args.Contains("--preflight")) return Preflight(true) ? 0 : 1;
 
-        var relayArgs = new List<string>();
+        var relayArgs = new List<string> { Target.RelayArg };
         foreach (var name in new[] { "--rumble", "--pair-seconds" })
         {
             string v = Opt(args, name);

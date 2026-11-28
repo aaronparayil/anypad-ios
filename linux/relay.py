@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Relay: forwards a USB gamepad to an iPhone/iPad, posing as a Bluetooth Xbox Wireless
-Controller. Xbox-type pads are read exactly; other pads use the usual button order.
+Relay: forwards a USB gamepad to an iPhone, iPad or Android device, posing as a Bluetooth
+Xbox Wireless Controller. Xbox-type pads are read exactly; other pads use the usual button order.
 
 Easiest way to start it:   bash run.sh
 Controller check only, no Bluetooth or phone needed:   bash run.sh --check
@@ -684,8 +684,7 @@ def run_relay(args):
         error_handler=fail("registering GATT service"))
     adv_mgr.RegisterAdvertisement(
         pt.Advertisement.PATH, {},
-        reply_handler=lambda: log("ready: on the phone, open Settings > Bluetooth and tap '%s'"
-                                  % pt.DEVICE_NAME),
+        reply_handler=lambda: log("ready: on the phone, " + PAIR_STEPS[args.phone] % pt.DEVICE_NAME),
         error_handler=fail("starting LE advertising"))
 
     def on_device_change(interface, changed, invalidated, path=None):
@@ -763,8 +762,17 @@ def run_relay(args):
     return 1 if failed else 0
 
 
+# Only the instructions differ: iOS and Android read the same Xbox controller layout.
+PAIR_STEPS = {
+    "ios": "open Settings > Bluetooth and tap '%s'",
+    "android": "open Bluetooth settings, tap Pair new device, then tap '%s'",
+}
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Forward a USB gamepad to iOS over Bluetooth")
+    ap = argparse.ArgumentParser(description="Forward a USB gamepad to an iPhone, iPad or Android device over Bluetooth")
+    ap.add_argument("--phone", choices=sorted(PAIR_STEPS), default="ios",
+                    help="which kind of phone, for the instructions (default ios)")
     ap.add_argument("--check", action="store_true",
                     help="only show what the controller is doing; no Bluetooth")
     ap.add_argument("--test-rumble", action="store_true",

@@ -12,10 +12,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("AnyPad")]
-[assembly: AssemblyProduct("anypad-ios")]
-[assembly: AssemblyVersion("0.1.1.0")]
-[assembly: AssemblyFileVersion("0.1.1.0")]
+#if ANDROID
+[assembly: AssemblyTitle("AnyPad for Android")]
+#else
+[assembly: AssemblyTitle("AnyPad for iPhone and iPad")]
+#endif
+[assembly: AssemblyProduct("AnyPad")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
 
 static class Gui
 {
@@ -68,7 +72,7 @@ class MainForm : Form
 
     public MainForm()
     {
-        Text = "AnyPad";
+        Text = Target.App;
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         Font = new Font("Segoe UI", 9.5f);
         BackColor = Theme.Back;
@@ -436,12 +440,12 @@ class MainForm : Form
         else if (line.Contains("phone DISCONNECTED")) phoneOn = false;
         path.Set(padOn, pcOn, phoneOn);
         if (stopping) return;
-        if (line.Contains("ready: on the phone")) Show("Waiting for your iPhone or iPad", Theme.Wait, "On it, open Settings > Bluetooth and tap Xbox Wireless Controller.");
-        else if (line.Contains("accepting pairing")) Show("Pairing...", Theme.Wait, "Tap Pair on the iPhone or iPad if it asks.");
+        if (line.Contains("ready: on the phone")) Show("Waiting for your " + Target.Phone, Theme.Wait, Target.PairSteps);
+        else if (line.Contains("accepting pairing")) Show("Pairing...", Theme.Wait, "Tap Pair on the " + Target.Phone + " if it asks.");
         else if (line.Contains("phone is listening") || (played && line.EndsWith("phone connected"))) { played = true; Show("Connected: play!", Theme.Good, "Open a game that supports controllers."); }
         else if (line.EndsWith("phone connected")) Show("Connecting...", Theme.Wait, "");
-        else if (line.Contains("phone DISCONNECTED")) Show("Disconnected", Theme.Wait, "Open Bluetooth settings on the iPhone or iPad to reconnect.");
-        else if (line.Contains("removed an out-of-date pairing")) Show("Pair it again", Theme.Wait, "Forget Xbox Wireless Controller on the iPhone or iPad, then tap it again.");
+        else if (line.Contains("phone DISCONNECTED")) Show("Disconnected", Theme.Wait, "Open Bluetooth settings on the " + Target.Phone + " to reconnect.");
+        else if (line.Contains("removed an out-of-date pairing")) Show("Pair it again", Theme.Wait, "Forget Xbox Wireless Controller on the " + Target.Phone + ", then pair it again.");
         else if (line.Contains("pairing is closed (time is up)") && !played) Show("Pairing closed", Theme.Wait, "Press Stop, then Start, to pair a phone. One that is already paired can still connect.");
     }
 
