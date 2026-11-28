@@ -19,7 +19,7 @@ Pick the one for your computer and your phone. Each pair is the same program wit
 | **[Windows](windows/README.md)**: one file, plus WSL and usbipd-win; uses this PC's Intel Bluetooth | `AnyPad-iOS.exe` | `AnyPad-Android.exe` |
 | **[Linux](linux/README.md)**: a window or a terminal script; also from an Ubuntu "Try Ubuntu" USB stick | `AnyPad-Linux-iOS` | `AnyPad-Linux-Android` |
 
-Download them from [Releases](https://github.com/aaronparayil/anypad-ios/releases). The Android apps use only Bluetooth LE while they run, because Android may otherwise pair over classic Bluetooth, where there's no controller.
+Download them from [Releases](https://github.com/aaronparayil/anypad-ios-android/releases). The Android apps use only Bluetooth LE while they run, because Android may otherwise pair over classic Bluetooth, where there's no controller.
 
 **Android without a computer:** many Android phones and tablets accept a USB gamepad, or its 2.4 GHz dongle, directly through a USB-C (OTG) adapter. Try that first; AnyPad is for when it doesn't work.
 

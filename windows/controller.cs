@@ -787,7 +787,7 @@ static class Program
     {
         var m = Regex.Match(line, @"^@rumble (\d+) (\d+) (\d+)$");
         if (!m.Success) { Say(line); return; }
-        int ms = Math.Min(5000, int.Parse(m.Groups[3].Value));
+        int ms = (int)Math.Min(60000L, long.Parse(m.Groups[3].Value));  // the relay caps it too
         lock (RumbleLock)
         {
             rumbleStrong = ms == 0 ? 0 : Math.Min(100, int.Parse(m.Groups[1].Value));

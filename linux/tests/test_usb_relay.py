@@ -167,8 +167,8 @@ try:
     FF.clear(); rum("0f000000000a0000")
     chk("zero strength stops", FF == [("play", eid, 0)], FF)
     FF.clear(); rum("020000646" + "4ff00ff")
-    chk("enable bits, long loop capped", FF == [
-        ("up", 0x50, eid, 2550, 0xffff, 0), ("play", eid, 1)], FF)
+    chk("enable bits; repeats without a pause are one steady rumble, capped at a minute", FF == [
+        ("up", 0x50, eid, 60000, 0xffff, 0), ("play", eid, 1)], FF)
     FF.clear(); rum("0f00006464000000")
     chk("zero length stops, never endless", FF == [("play", eid, 0)], FF)
     FF.clear()

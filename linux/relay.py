@@ -116,6 +116,7 @@ def _ior(nr, size):
 FF_EFFECT = struct.Struct("HhHHHHH2xHH28x")
 EVIOCSFF = (1 << 30) | (FF_EFFECT.size << 16) | (ord("E") << 8) | 0x80
 MAX_RUMBLE_MS = 5000
+MAX_STEADY_RUMBLE_MS = 60000
 
 
 def parse_rumble(data):
@@ -127,10 +128,14 @@ def parse_rumble(data):
     """
     if len(data) != 8:
         return None
-    enable, _, _, strong, weak, on, _, loops = data
+    enable, _, _, strong, weak, on, off, loops = data
     strong = min(strong, 100) if enable & 2 else 0
     weak = min(weak, 100) if enable & 1 else 0
     length = on * 10
+    if length and not off and loops:
+        # Repeats with no pause are one steady rumble, until a report with zero strength.
+        # Android's kernel asks this way for any rumble longer than a moment.
+        return strong, weak, min(length * (loops + 1), MAX_STEADY_RUMBLE_MS), 1
     repeats = min(loops + 1, max(1, MAX_RUMBLE_MS // length)) if length else 0
     return strong, weak, length, repeats
 

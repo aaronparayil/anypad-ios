@@ -202,6 +202,7 @@ try:
         parsed = relay.parse_rumble(outputs[0][1:])
         print("rumble report:", outputs[0].hex(), "->", parsed)
         chk("relay reads it: strong 100 %, weak 50 %", parsed and parsed[:2] == (100, 50), parsed)
+        chk("as one steady rumble until stopped (up to a minute)", parsed and parsed[2:] == (60000, 1), parsed)
     outputs.clear()
     os.write(ev_fd, INPUT_EVENT.pack(0, 0, EV_FF, effect_id, 0))
     for _ in range(40):

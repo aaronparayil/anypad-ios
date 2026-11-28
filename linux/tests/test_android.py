@@ -73,6 +73,13 @@ time.sleep(.2)
 chk("window starts the engine for Android", seen[0][-2:] == ["run", "android"], seen[0])
 chk("and for iOS by default", seen[1][-2:] == ["run", "ios"], seen[1])
 
+print("== rumble reports")
+import relay
+chk("Android's steady rumble: one long run", relay.parse_rumble(bytes.fromhex("0300006432ff00ff")) == (100, 50, 60000, 1))
+chk("pulses with pauses: unchanged", relay.parse_rumble(bytes.fromhex("0f00006315 0a 0a 02".replace(" ", ""))) == (99, 21, 100, 3))
+chk("one short rumble: unchanged", relay.parse_rumble(bytes.fromhex("0f000063150a0000")) == (99, 21, 100, 1))
+chk("stop", relay.parse_rumble(bytes.fromhex("0300000000ff00ff"))[:2] == (0, 0))
+
 print("== relay instructions")
 d = subprocess.Popen(["dbus-daemon", "--session", "--print-address", "--nofork"], stdout=subprocess.PIPE, text=True)
 env = dict(os.environ, DBUS_SYSTEM_BUS_ADDRESS=d.stdout.readline().strip(), PYTHONDONTWRITEBYTECODE="1", REFUSE="0")
